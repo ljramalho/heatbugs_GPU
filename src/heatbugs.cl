@@ -56,9 +56,9 @@
 
 
 
-#define GOTO_ANY_FREE			111
-#define GOTO_MAX_TEMPERATURE	010
-#define GOTO_MIN_TEMPERATURE	001
+#define GOTO_ANY_FREE			0x00ffffff
+#define GOTO_MAX_TEMPERATURE	0x00ffff00
+#define GOTO_MIN_TEMPERATURE	0x00ff00ff
 
 
 
@@ -164,7 +164,7 @@ inline uint randomInt( uint min, uint max, __global uint *rng_state )
 
 
 
-inline uint best_Free_Neighbour( short todo, __global float *heat_map, __global uint *swarm_map, __private uint bug_locus )
+inline uint best_Free_Neighbour( int todo, __global float *heat_map, __global uint *swarm_map, __private uint bug_locus )
 {
 	uint lc, cc;			/* Line at Center, Column at center. */
 	uint ln, ls, ce, cw;	/* Line at North/South, Column at East/West. */
@@ -185,9 +185,9 @@ inline uint best_Free_Neighbour( short todo, __global float *heat_map, __global 
 
 	if (todo != GOTO_ANY_FREE)
 	{
-		/* Actual bug_locus is also the best_locus until otherwise. */
-		best.x = AS_UINT( heat_map[ bug_locus ] );
-		best.y = bug_locus;
+		/* Actual bug location is also the best location until otherwise. */
+		best.locus = bug_locus;
+		best.temperature = heat_map[ bug_locus ];
 
 
 		for (uint neigh = SW; neigh < NE; neigh++ )
@@ -199,13 +199,8 @@ inline uint best_Free_Neighbour( short todo, __global float *heat_map, __global 
 
 
 		/* NW*/
-		neighbour.y = ln * WORLD_WIDTH + cw;
-		neighbour_temperature = heat_map[ neighbour.y ];
-		neighbour.x = AS_UINT( neighbour_temperature );
-		best = select(
-					select( best, neighbour, neighbour.temperature < best.temperature  ),
-					select( best, neighbour, neighbour.temperature > best.temperature ),
-					todo == GOTO_MAX_TEMPERATURE );
+		neighbour.locus = ln * WORLD_WIDTH + cw;
+		neighbour.temperature = heat_map[ neighbour.locus ];
 
 
 
@@ -379,7 +374,7 @@ __kernel void bug_step( __global uint *swarm_bugPosition, __global uint *swarm_b
 	__private uint bug;
 	__private uint bug_old;
 
-	__private short todo;
+	__private int todo;
 
 
 	const uint bug_idx = get_global_id( 0 );
