@@ -56,9 +56,9 @@
 
 
 
-#define RANDOM_CHANCE		111
-#define MAX_TEMPERATURE		010
-#define MIN_TEMPERATURE		001
+#define GOTO_ANY_FREE			111
+#define GOTO_MAX_TEMPERATURE	010
+#define GOTO_MIN_TEMPERATURE	001
 
 
 
@@ -76,22 +76,41 @@
 
 /* Macros for 32 bits / unsigned int. */
 
-#define BUG_NEW( reg ) reg = BUG
+#define BUG_NEW( uint_reg ) uint_reg = BUG
 
-#define SET_BUG( reg ) reg = (reg & 0xff00ff00) | BUG
-#define SET_BUG_IDEAL_TEMPERATURE( reg, value ) reg = (reg & 0x00ffffff) | ((value) << 24)
-#define SET_BUG_OUTPUT_HEAT( reg, value ) reg = (reg & 0xffff00ff) | ((value) << 8)
+#define SET_BUG( uint_reg ) uint_reg = (uint_reg & 0xff00ff00) | BUG
+#define SET_BUG_IDEAL_TEMPERATURE( uint_reg, value ) uint_reg = (uint_reg & 0x00ffffff) | ((value) << 24)
+#define SET_BUG_OUTPUT_HEAT( uint_reg, value ) uint_reg = (uint_reg & 0xffff00ff) | ((value) << 8)
 
-#define HAS_BUG( reg ) ( (reg) != 0 )
+#define HAS_BUG( uint_reg ) ( (uint_reg) != 0 )
 
 
-//#define BUG_RESET( reg ) reg = N_BUG
-#define GET_BUG_IDEAL_TEMPERATURE( reg ) ( ((reg) & 0xff000000) >> 24 )
-#define GET_BUG_OUTPUT_HEAT( reg ) ( ((reg) & 0x0000ff00) >> 8 )
-
+#define GET_BUG_IDEAL_TEMPERATURE( uint_reg ) ( ((uint_reg) & 0xff000000) >> 24 )
+#define GET_BUG_OUTPUT_HEAT( uint_reg ) ( ((uint_reg) & 0x0000ff00) >> 8 )
 
 
 
+/*
+ * Ugly thing to do:
+ *		bit store floats into uints, and uints back to float.
+ * The point is to store a float as if it is a unsigned int, not to do
+ * cast convertion between them.
+ * Is used to store the temperature, a float into unsigned int.
+ * NOTE: uint must have the same size as float. As such it may not be portable...
+ * */
+#define AS_UINT( float_rval ) ( *(uint *) &(float_rval) )
+#define AS_FLOAT( uint_rval ) ( *(float *) &(uint_rval) )
+
+
+
+typedef struct {
+	uint locus;
+	float temperature;
+} best_locus_t;
+
+
+
+typedef enum neighbours {SW, S, SE, W, E, NW, N, NE} neighbours_t;
 
 /*
  * https://gist.github.com/Marc-B-Reynolds/0b5f1db5ad7a3e453596
@@ -127,14 +146,14 @@ inline uint rand_xorShift32( __global uint *rng_state )
 /* Return random float in range [0 .. 1[.
  * The rng_state is updated.
  * */
-inline double randomFloat( __global uint *rng_state )
+inline double randomFloat( uint min, uint max, __global uint *rng_state )
 {
-	return (double) rand_xorShift32( rng_state ) * ( 1.0 / 4294967296.0 );
+	return (max - min) * (double) rand_xorShift32( rng_state ) * ( 1.0 / 4294967296.0 ) + min;
 }
 
 
 
-/* Return random integer in range [min .. max].
+/* Return random integer in range [min .. max[.
  * The rng_state is updated.
  * */
 inline uint randomInt( uint min, uint max, __global uint *rng_state )
@@ -144,12 +163,99 @@ inline uint randomInt( uint min, uint max, __global uint *rng_state )
 
 
 
-inline bestFreeNeighbour()
+
+inline uint best_Free_Neighbour( short todo, __global float *heat_map, __global uint *swarm_map, __private uint bug_locus )
 {
+	uint lc, cc;			/* Line at Center, Column at center. */
+	uint ln, ls, ce, cw;	/* Line at North/South, Column at East/West. */
+	uint pos;
+
+	best_locus_t best, neighbour;
+
+
+
+	lc = bug_locus / WORLD_WIDTH;
+	cc = bug_locus % WORLD_WIDTH;
+
+	/* Compute required coodinates. */
+	ln = (lc + 1) % WORLD_HEIGHT;					/* Line at North.   */
+	ls = (lc + WORLD_HEIGHT - 1) % WORLD_HEIGHT;	/* Line at South.   */
+	ce = (cc + 1) % WORLD_WIDTH;					/* Column at East.  */
+	cw = (cc + WORLD_WIDTH - 1) % WORLD_WIDTH;		/* Columns at West. */
+
+	if (todo != GOTO_ANY_FREE)
+	{
+		/* Actual bug_locus is also the best_locus until otherwise. */
+		best.x = AS_UINT( heat_map[ bug_locus ] );
+		best.y = bug_locus;
+
+
+		for (uint neigh = SW; neigh < NE; neigh++ )
+		{
+
+		}
+
+
+
+
+		/* NW*/
+		neighbour.y = ln * WORLD_WIDTH + cw;
+		neighbour_temperature = heat_map[ neighbour.y ];
+		neighbour.x = AS_UINT( neighbour_temperature );
+		best = select(
+					select( best, neighbour, neighbour.temperature < best.temperature  ),
+					select( best, neighbour, neighbour.temperature > best.temperature ),
+					todo == GOTO_MAX_TEMPERATURE );
+
+
+
+		/* N  */
+//		neighbour.y = ln * WORLD_WIDTH + cc:
+//		neighbour_temperature = heat_map[ neighbour.y ];
+//		neighbour.x = AS_UINT( neighbour_temperature );
+
+
+		/* NE */
+//		neighbour.y = ln * WORLD_WIDTH + ce;
+//		neighbour_temperature = heat_map[ neighbour.y ];
+//		neighbour.x = AS_UINT( neighbour_temperature );
+
+
+		/* W  */
+//		neighbour.y = lc * WORLD_WIDTH + cw;
+//		neighbour_temperature = heat_map[ neighbour.y ];
+//		neighbour.x = AS_UINT( neighbour_temperature );
+
+
+		/* E  */
+//		neighbour.y = lc * WORLD_WIDTH + ce;
+//		neighbour_temperature = heat_map[ neighbour.y  ];
+//		neighbour.x = AS_UINT( neighbour_temperature );
+
+
+		/* SW */
+//		neighbour.y = ls * WORLD_WIDTH + cw;
+//		neighbour_temperature = heat_map[ neighbour.y  ];
+//		neighbour.x = AS_UINT( neighbour_temperature );
+
+		/* S  */
+//		neighbour.y = ls * WORLD_WIDTH + cc;
+//		neighbour_temperature = heat_map[ neighbour.y ];
+//		neighbour.x = AS_UINT( neighbour_temperature );
+
+
+		/* SE */
+//		neighbour.y = ls * WORLD_WIDTH + ce;
+//		neighbour_temperature = heat_map[ neighbour.y ];
+//		neighbour.x = AS_UINT( neighbour_temperature );
+	}
+
+	/* If best location is current bug location, return. */
+
+	/* If location is free, return. */
+	return 0;
 
 }
-
-
 
 
 
@@ -163,7 +269,7 @@ inline bestFreeNeighbour()
  * Wang Hash, hash one integer into another.
  * Obliterate any correlation in the seeds when going wide (parallel), prior
  * any use of a PRNG (going deep).
- * Correlation comes from sequential global ID's for each workitem.
+ * Correlation comes from sequential global ID's of each workitem.
  * */
 __kernel void init_random( __global uint *rng_state )
 {
@@ -210,13 +316,14 @@ __kernel void init_maps( __global uint *swarm_map, __global float *heat_map, __g
  * Reset the swarm intention vector (stores the intended bug movement.
  * Initiate the unhappiness for each bug.
  * */
-__kernel void init_swarm( __global uint *swarm, __global uint *swarm_intention, __global uint *swarm_map, __global float *unhappiness, __global uint *rng_state )
+__kernel void init_swarm( __global uint *swarm_bugPosition, __global uint *swarm_bugGoto, __global uint *swarm_map, __global float *unhappiness, __global uint *rng_state )
 {
 	__private uint bug_locus;
 	__private uint bug_ideal_temperature;	/* [0..200] */
 	__private uint bug_output_heat;			/* [0..100] */
-	__private uint bug_old;
 	__private uint bug_new;
+	__private uint bug_old;
+
 
 	const uint bug_idx = get_global_id( 0 );
 
@@ -240,9 +347,9 @@ __kernel void init_swarm( __global uint *swarm, __global uint *swarm_intention, 
 	barrier( CLK_GLOBAL_MEM_FENCE );	/* All workitems should arrive here before go on. */
 
 	/* Store bug position in the swarm. */
-	swarm[ bug_idx ] = bug_locus;
+	swarm_bugPosition[ bug_idx ] = bug_locus;
 	/* Reset... */
-	swarm_intention[ bug_idx ] = 0;
+	swarm_bugGoto[ bug_idx ] = 0;
 
 	/*
 	 * Compute initial unhappiness as abs(ideal_temperature - temperature).
@@ -259,16 +366,18 @@ __kernel void init_swarm( __global uint *swarm, __global uint *swarm_intention, 
 /*
  * Perform a bug movement in the world.
  * */
-__kernel void bug_step( __global uint *swarm, __global uint *swarm_intention, __global uint *swarm_map,
+__kernel void bug_step( __global uint *swarm_bugPosition, __global uint *swarm_bugGoto, __global uint *swarm_map,
 						__global float *heat_map, /*__global float *heat_buffer, */
 						__global float *unhappiness, __global uint *rng_state )
 {
 	__private uint bug_locus;
+	__private uint bug_new_locus;
 	__private uint bug_ideal_temperature;	/* [0..200] */
 	__private uint bug_output_heat;			/* [0..100] */
 	__private float bug_unhappiness;
 	__private float locus_temperature;
 	__private uint bug;
+	__private uint bug_old;
 
 	__private short todo;
 
@@ -278,7 +387,7 @@ __kernel void bug_step( __global uint *swarm, __global uint *swarm_intention, __
 	if (bug_idx >= BUGS_NUMBER) return;
 
 
-	bug_locus = swarm[ bug_idx ];
+	bug_locus = swarm_bugPosition[ bug_idx ];
 
 	bug = swarm_map[ bug_locus ];
 	locus_temperature = heat_map[ bug_locus ];
@@ -289,7 +398,7 @@ __kernel void bug_step( __global uint *swarm, __global uint *swarm_intention, __
 	bug_unhappiness = fabs( (float) bug_ideal_temperature - locus_temperature );
 	unhappiness[ bug_idx ] = bug_unhappiness;
 
-	/* INFO: Mem fence here */
+	/* INFO: Mem fence here? */
 
 	/*
 	 * Find the best place for the bug to go. Tricky stuff!
@@ -303,18 +412,28 @@ __kernel void bug_step( __global uint *swarm, __global uint *swarm_intention, __
 	 *
 	 * A variable is used to hold what to do, (1), (2) or (3). However the
 	 * order must be reversed since (1), when happen, takes precedence over
-	 * (2) or (3), whatever (2) XOR (3) is true.
+	 * (2) or (3), whatever (2) XOR (3) is true or not.
 	 * */
 
 	if (bug_unhappiness > 0.0)
 	{
-		todo = select( MIN_TEMPERATURE, MAX_TEMPERATURE, locus_temperature < bug_ideal_temperature );
-		todo = select( todo, RANDOM_CHANCE, randomFloat() < BUGS_RANDOM_MOVE_CHANCE );
+		todo = select( GOTO_MIN_TEMPERATURE, GOTO_MAX_TEMPERATURE, locus_temperature < bug_ideal_temperature );
+		todo = select( todo, GOTO_ANY_FREE, randomFloat( 0, 100, &rng_state[ bug_idx ] ) < BUGS_RANDOM_MOVE_CHANCE );
 
+		bug_new_locus = best_Free_Neighbour( todo, heat_map, swarm_map, bug_locus );
 
+		/* Store bug the bug to the new location. */
+		if (bug_new_locus != bug_locus)
+		{
+			bug_old = atomic_cmpxchg( &swarm_map[ bug_locus ], EMPTY_CELL, bug );
+
+			swarm_map[ bug_locus ] = 0;
+		}
 	}
 
+	heat_map[ bug_locus ] += bug_output_heat;
 
+	return;
 }
 
 

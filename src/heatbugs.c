@@ -190,7 +190,7 @@ static GQuark hb_error_quark( void ) {
 
 static void setupParameters( parameters_t *const params, GError **err )
 {
-	 /* TODO: Get simulation parameters. */
+	 /* TODO: Get simulation parameters. This ones are defaults. */
 	params->bugs_temperature_min_ideal = 20;	/* 10 */
 	params->bugs_temperature_max_ideal = 30;	/* 40 */
 	params->bugs_heat_min_output = 15;			/*  5 */
