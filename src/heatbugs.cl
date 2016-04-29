@@ -91,27 +91,7 @@
 
 
 
-/*
- * Ugly thing to do:
- *		bit store floats into uints, and uints back to float.
- * The point is to store a float as if it is a unsigned int, not to do
- * cast convertion between them.
- * Is used to store the temperature, a float into unsigned int.
- * NOTE: uint must have the same size as float. As such it may not be portable...
- * */
-#define AS_UINT( float_rval ) ( *(uint *) &(float_rval) )
-#define AS_FLOAT( uint_rval ) ( *(float *) &(uint_rval) )
 
-
-
-typedef struct {
-	uint locus;
-	float temperature;
-} best_locus_t;
-
-
-
-typedef enum neighbours {SW, S, SE, W, E, NW, N, NE} neighbours_t;
 
 /*
  * https://gist.github.com/Marc-B-Reynolds/0b5f1db5ad7a3e453596
@@ -144,7 +124,8 @@ inline uint rand_xorShift32( __global uint *rng_state )
 
 
 
-/* Return random float in range [min .. max[.
+/*
+ * Return random float in range [min .. max[.
  * The rng_state is updated.
  * */
 inline double randomFloat( uint min, uint max, __global uint *rng_state )
@@ -154,7 +135,8 @@ inline double randomFloat( uint min, uint max, __global uint *rng_state )
 
 
 
-/* Return random integer in range [min .. max[.
+/*
+ * Return random integer in range [min .. max[.
  * The rng_state is updated.
  * */
 inline uint randomInt( uint min, uint max, __global uint *rng_state )
@@ -164,33 +146,52 @@ inline uint randomInt( uint min, uint max, __global uint *rng_state )
 
 
 
-
+/*
+ * It returns either:
+ *		1- A free location with best (MAX Temperature | MIN Temperature).
+ *		2- Any random free location.
+ *		3- Self location.
+ * for any agent.
+ * World is a vector mapped to a matrix growing from (0,0) toward NorthEast,
+ * that is, first cartesian quadrant.
+ * */
 inline uint best_Free_Neighbour( int todo, __global float *heat_map, __global uint *swarm_map, __private uint bug_locus, __global uint *rng_state )
 {
-	__private char N_IDX[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+	__private uint rc, cc;			/* Row at Center, Column at center. */
+	__private uint rn, rs, ce, cw;	/* Row at North/South, Column at East/West. */
 
-	__private uint lc, cc;			/* Line at Center, Column at center. */
-	__private uint ln, ls, ce, cw;	/* Line at North/South, Column at East/West. */
-	__private uint pos;
+	__private uint2 best;			/* best.x position, best.y temperature. */
+	__private uint neighbour_locus[ 8 ];
+	__private float  neighbour_temperature;
 
-	__private best_locus_t best, neighbour;
+	__private char N_IDX[ 8 ] = {0, 1, 2, 3, 4, 5, 6, 7};
 
+	/* Agent vector position into the world / 2D position. */
+	rc = bug_locus / WORLD_WIDTH;					/* Row at Center.    */
+	cc = bug_locus % WORLD_WIDTH;					/* Column at Center. */
 
+	/* Neighbouring rows and columns. */
+	rn = (rc + 1) % WORLD_HEIGHT;					/* Row at North.   */
+	rs = (rc + WORLD_HEIGHT - 1) % WORLD_HEIGHT;	/* Row at South.   */
+	ce = (cc + 1) % WORLD_WIDTH;					/* Column at East. */
+	cw = (cc + WORLD_WIDTH - 1) % WORLD_WIDTH;		/* Column at West. */
 
-	lc = bug_locus / WORLD_WIDTH;
-	cc = bug_locus % WORLD_WIDTH;
+	/* Back to vector positions. Used on both, best location and random location. */
+	neighbour_locus[ 0 ] = rs * WORLD_WIDTH + cw;	/* SW neighbour position. */
+	neighbour_locus[ 1 ] = rs * WORLD_WIDTH + cc;	/* S  neighbour Position. */
+	neighbour_locus[ 2 ] = rs * WORLD_WIDTH + ce;	/* SE neighbour position. */
+	neighbour_locus[ 3 ] = rc * WORLD_WIDTH + cw;	/* W  neighbour position. */
+	neighbour_locus[ 4 ] = rc * WORLD_WIDTH + ce;	/* E  neighbour position. */
+	neighbour_locus[ 5 ] = rn * WORLD_WIDTH + cw;	/* NW neighbour position. */
+	neighbour_locus[ 6 ] = rn * WORLD_WIDTH + cc;	/* N  neighbour position. */
+	neighbour_locus[ 7 ] = rn * WORLD_WIDTH + ce;	/* NE neighbour position. */
 
-	/* Compute required coodinates. */
-	ln = (lc + 1) % WORLD_HEIGHT;					/* Line at North.   */
-	ls = (lc + WORLD_HEIGHT - 1) % WORLD_HEIGHT;	/* Line at South.   */
-	ce = (cc + 1) % WORLD_WIDTH;					/* Column at East.  */
-	cw = (cc + WORLD_WIDTH - 1) % WORLD_WIDTH;		/* Columns at West. */
 
 	if (todo != GOTO_ANY_FREE)
 	{
 		/* Actual bug location is also the best location until otherwise. */
-		best.locus = bug_locus;
-		best.temperature = heat_map[ bug_locus ];
+		best.x = bug_locus;							/* Position.    */
+		best.y = as_uint( heat_map[ bug_locus ] );	/* temperature. */
 
 		/* Loop unroll. */
 
@@ -292,8 +293,9 @@ inline uint best_Free_Neighbour( int todo, __global float *heat_map, __global ui
 	 * */
 
 	 /*
-	  * Shuffle an index vector so we can pick a random free neighbour
-	  * by checking each by index until find a first free.
+	  * Fisher-Yates shuffle algorithm to shuffle an index vector so we can
+	  * pick a random free neighbour by checking each by index until find a
+	  * first free.
 	  * */
 	  for (uint i = 0; i < 8; i++)
 	  {
@@ -306,6 +308,8 @@ inline uint best_Free_Neighbour( int todo, __global float *heat_map, __global ui
 	  	  N_IDX[ rnd ] = tmp;
 	  }
 
+	  /* Loop unroll. */
+	  neighbour.locus =
 
 
 
