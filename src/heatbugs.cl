@@ -82,7 +82,8 @@
 #define SET_BUG_IDEAL_TEMPERATURE( uint_reg, value ) uint_reg = (uint_reg & 0x00ffffff) | ((value) << 24)
 #define SET_BUG_OUTPUT_HEAT( uint_reg, value ) uint_reg = (uint_reg & 0xffff00ff) | ((value) << 8)
 
-#define HAS_BUG( uint_reg ) ( (uint_reg) != 0 )
+#define HAS_BUG( uint_reg ) ((uint_reg) != EMPTY_CELL)
+#define HAS_NO_BUG( uint_reg ) ((uint_reg) == EMPTY_CELL)
 
 
 #define GET_BUG_IDEAL_TEMPERATURE( uint_reg ) ( ((uint_reg) & 0xff000000) >> 24 )
@@ -143,7 +144,7 @@ inline uint rand_xorShift32( __global uint *rng_state )
 
 
 
-/* Return random float in range [0 .. 1[.
+/* Return random float in range [min .. max[.
  * The rng_state is updated.
  * */
 inline double randomFloat( uint min, uint max, __global uint *rng_state )
@@ -166,11 +167,13 @@ inline uint randomInt( uint min, uint max, __global uint *rng_state )
 
 inline uint best_Free_Neighbour( int todo, __global float *heat_map, __global uint *swarm_map, __private uint bug_locus )
 {
-	uint lc, cc;			/* Line at Center, Column at center. */
-	uint ln, ls, ce, cw;	/* Line at North/South, Column at East/West. */
-	uint pos;
+	__private char N_IDX[8] = {0, 1, 2, 3, 4, 5, 6, 7};
 
-	best_locus_t best, neighbour;
+	__private uint lc, cc;			/* Line at Center, Column at center. */
+	__private uint ln, ls, ce, cw;	/* Line at North/South, Column at East/West. */
+	__private uint pos;
+
+	__private best_locus_t best, neighbour;
 
 
 
@@ -189,65 +192,109 @@ inline uint best_Free_Neighbour( int todo, __global float *heat_map, __global ui
 		best.locus = bug_locus;
 		best.temperature = heat_map[ bug_locus ];
 
+		/* Loop unroll. */
 
-		for (uint neigh = SW; neigh < NE; neigh++ )
-		{
-
-		}
-
-
-
-
-		/* NW*/
+		/** NW **/
 		neighbour.locus = ln * WORLD_WIDTH + cw;
 		neighbour.temperature = heat_map[ neighbour.locus ];
 
+		if (todo == GOTO_MAX_TEMPERATURE) {
+			if (neighbour.temperature > best.temperature)	best = neighbour;
+		}
+		else {	/* todo == GOTO_MIN_TEMPERATURE */
+			if (neighbour.temperature < best.temperature)	best = neighbour;
+		}
 
+		/** N  **/
+		neighbour.locus = ln * WORLD_WIDTH + cc;
+		neighbour.temperature = heat_map[ neighbour.locus ];
 
-		/* N  */
-//		neighbour.y = ln * WORLD_WIDTH + cc:
-//		neighbour_temperature = heat_map[ neighbour.y ];
-//		neighbour.x = AS_UINT( neighbour_temperature );
+		if (todo == GOTO_MAX_TEMPERATURE) {
+			if (neighbour.temperature > best.temperature)	best = neighbour;
+		}
+		else {	/* todo == GOTO_MIN_TEMPERATURE */
+			if (neighbour.temperature < best.temperature)	best = neighbour;
+		}
 
+		/** NE **/
+		neighbour.locus = ln * WORLD_WIDTH + ce;
+		neighbour.temperature = heat_map[ neighbour.locus ];
 
-		/* NE */
-//		neighbour.y = ln * WORLD_WIDTH + ce;
-//		neighbour_temperature = heat_map[ neighbour.y ];
-//		neighbour.x = AS_UINT( neighbour_temperature );
+		if (todo == GOTO_MAX_TEMPERATURE) {
+			if (neighbour.temperature > best.temperature)	best = neighbour;
+		}
+		else {	/* todo == GOTO_MIN_TEMPERATURE */
+			if (neighbour.temperature < best.temperature)	best = neighbour;
+		}
 
+		/** W  **/
+		neighbour.locus = lc * WORLD_WIDTH + cw;
+		neighbour.temperature = heat_map[ neighbour.locus ];
 
-		/* W  */
-//		neighbour.y = lc * WORLD_WIDTH + cw;
-//		neighbour_temperature = heat_map[ neighbour.y ];
-//		neighbour.x = AS_UINT( neighbour_temperature );
+		if (todo == GOTO_MAX_TEMPERATURE) {
+			if (neighbour.temperature > best.temperature)	best = neighbour;
+		}
+		else {	/* todo == GOTO_MIN_TEMPERATURE */
+			if (neighbour.temperature < best.temperature)	best = neighbour;
+		}
 
+		/** E  **/
+		neighbour.locus = lc * WORLD_WIDTH + ce;
+		neighbour.temperature = heat_map[ neighbour.locus ];
 
-		/* E  */
-//		neighbour.y = lc * WORLD_WIDTH + ce;
-//		neighbour_temperature = heat_map[ neighbour.y  ];
-//		neighbour.x = AS_UINT( neighbour_temperature );
+		if (todo == GOTO_MAX_TEMPERATURE) {
+			if (neighbour.temperature > best.temperature)	best = neighbour;
+		}
+		else {	/* todo == GOTO_MIN_TEMPERATURE */
+			if (neighbour.temperature < best.temperature)	best = neighbour;
+		}
 
+		/** SW **/
+		neighbour.locus = ls * WORLD_WIDTH + cw;
+		neighbour.temperature = heat_map[ neighbour.locus ];
 
-		/* SW */
-//		neighbour.y = ls * WORLD_WIDTH + cw;
-//		neighbour_temperature = heat_map[ neighbour.y  ];
-//		neighbour.x = AS_UINT( neighbour_temperature );
+		if (todo == GOTO_MAX_TEMPERATURE) {
+			if (neighbour.temperature > best.temperature)	best = neighbour;
+		}
+		else {	/* todo == GOTO_MIN_TEMPERATURE */
+			if (neighbour.temperature < best.temperature)	best = neighbour;
+		}
 
-		/* S  */
-//		neighbour.y = ls * WORLD_WIDTH + cc;
-//		neighbour_temperature = heat_map[ neighbour.y ];
-//		neighbour.x = AS_UINT( neighbour_temperature );
+		/** S  **/
+		neighbour.locus = ls * WORLD_WIDTH + cc;
+		neighbour.temperature = heat_map[ neighbour.locus ];
 
+		if (todo == GOTO_MAX_TEMPERATURE) {
+			if (neighbour.temperature > best.temperature)	best = neighbour;
+		}
+		else {	/* todo == GOTO_MIN_TEMPERATURE */
+			if (neighbour.temperature < best.temperature)	best = neighbour;
+		}
 
-		/* SE */
-//		neighbour.y = ls * WORLD_WIDTH + ce;
-//		neighbour_temperature = heat_map[ neighbour.y ];
-//		neighbour.x = AS_UINT( neighbour_temperature );
+		/** SE **/
+		neighbour.locus = ls * WORLD_WIDTH + ce;
+		neighbour.temperature = heat_map[ neighbour.locus ];
+
+			if (todo == GOTO_MAX_TEMPERATURE) {
+			if (neighbour.temperature > best.temperature)	best = neighbour;
+		}
+		else {	/* todo == GOTO_MIN_TEMPERATURE */
+			if (neighbour.temperature < best.temperature)	best = neighbour;
+		}
+
+		/* Return, if bug is already in the best local or if new best local is bug free, */
+		if ((best.locus == bug_locus) || HAS_NO_BUG( swarm_map[ best.locus ] )) return best.locus;
 	}
 
-	/* If best location is current bug location, return. */
+	/*
+	 * Here: there is a random moving chance, or the best neighbour is not free.
+	 * Try to find any avaiable free place.
+	 * */
 
-	/* If location is free, return. */
+
+
+
+
 	return 0;
 
 }
