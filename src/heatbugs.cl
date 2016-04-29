@@ -91,6 +91,7 @@
 
 
 
+enum {SW = 0, S, SE, W, E, NW, N, NE};
 
 
 /*
@@ -157,134 +158,76 @@ inline uint randomInt( uint min, uint max, __global uint *rng_state )
  * */
 inline uint best_Free_Neighbour( int todo, __global float *heat_map, __global uint *swarm_map, __private uint bug_locus, __global uint *rng_state )
 {
-	__private uint rc, cc;			/* Row at Center, Column at center. */
-	__private uint rn, rs, ce, cw;	/* Row at North/South, Column at East/West. */
-
-	__private uint2 best;			/* best.x position, best.y temperature. */
-	__private uint neighbour_locus[ 8 ];
-	__private float  neighbour_temperature;
-
-	__private char N_IDX[ 8 ] = {0, 1, 2, 3, 4, 5, 6, 7};
-
 	/* Agent vector position into the world / 2D position. */
-	rc = bug_locus / WORLD_WIDTH;					/* Row at Center.    */
-	cc = bug_locus % WORLD_WIDTH;					/* Column at Center. */
+	__private const uint rc = bug_locus / WORLD_WIDTH;					/* Row at Center.   */
+	__private const uint cc = bug_locus % WORLD_WIDTH;					/*Column at center. */
 
 	/* Neighbouring rows and columns. */
-	rn = (rc + 1) % WORLD_HEIGHT;					/* Row at North.   */
-	rs = (rc + WORLD_HEIGHT - 1) % WORLD_HEIGHT;	/* Row at South.   */
-	ce = (cc + 1) % WORLD_WIDTH;					/* Column at East. */
-	cw = (cc + WORLD_WIDTH - 1) % WORLD_WIDTH;		/* Column at West. */
+	__private const uint rn = (rc + 1) % WORLD_HEIGHT;					/* Row at North.    */
+	__private const uint rs = (rc + WORLD_HEIGHT - 1) % WORLD_HEIGHT;	/* Row at South.    */
+	__private const uint ce = (cc + 1) % WORLD_WIDTH;					/* Column at East.  */
+	__private const uint cw = (cc + WORLD_WIDTH - 1) % WORLD_WIDTH;		/* Column at West.  */
+
+	__private uint2 best;				/* best.s0 position, best.s1 temperature. */
+	__private uint2 neighbour[ 8 ];		/* neighbour[..].s0 position, neighbour[..].s1, temperature. */
+
+	__private uint NEIGHBOUR_IDX[ 8 ] = {SW, S, SE, W, E, NW, N, NE};
+
 
 	/* Back to vector positions. Used on both, best location and random location. */
-	neighbour_locus[ 0 ] = rs * WORLD_WIDTH + cw;	/* SW neighbour position. */
-	neighbour_locus[ 1 ] = rs * WORLD_WIDTH + cc;	/* S  neighbour Position. */
-	neighbour_locus[ 2 ] = rs * WORLD_WIDTH + ce;	/* SE neighbour position. */
-	neighbour_locus[ 3 ] = rc * WORLD_WIDTH + cw;	/* W  neighbour position. */
-	neighbour_locus[ 4 ] = rc * WORLD_WIDTH + ce;	/* E  neighbour position. */
-	neighbour_locus[ 5 ] = rn * WORLD_WIDTH + cw;	/* NW neighbour position. */
-	neighbour_locus[ 6 ] = rn * WORLD_WIDTH + cc;	/* N  neighbour position. */
-	neighbour_locus[ 7 ] = rn * WORLD_WIDTH + ce;	/* NE neighbour position. */
+	neighbour[ SW ].s0 = rs * WORLD_WIDTH + cw;		/* SW neighbour position. */
+	neighbour[ S  ].s0 = rs * WORLD_WIDTH + cc;		/* S  neighbour Position. */
+	neighbour[ SE ].s0 = rs * WORLD_WIDTH + ce;		/* SE neighbour position. */
+	neighbour[ W  ].s0 = rc * WORLD_WIDTH + cw;		/* W  neighbour position. */
+	neighbour[ E  ].s0 = rc * WORLD_WIDTH + ce;		/* E  neighbour position. */
+	neighbour[ NW ].s0 = rn * WORLD_WIDTH + cw;		/* NW neighbour position. */
+	neighbour[ N  ].s0 = rn * WORLD_WIDTH + cc;		/* N  neighbour position. */
+	neighbour[ NE ].s0 = rn * WORLD_WIDTH + ce;		/* NE neighbour position. */
 
 
 	if (todo != GOTO_ANY_FREE)
 	{
+		/* Fetch temperature of all neighbours. */
+		neighbour[ SW ].s1 = as_uint( heat_map[ neighbour[ SW ].s0 ] );
+ 		neighbour[ S  ].s1 = as_uint( heat_map[ neighbour[ S  ].s0 ] );
+ 		neighbour[ SE ].s1 = as_uint( heat_map[ neighbour[ SE ].s0 ] );
+ 		neighbour[ W  ].s1 = as_uint( heat_map[ neighbour[ W  ].s0 ] );
+ 		neighbour[ E  ].s1 = as_uint( heat_map[ neighbour[ E  ].s0 ] );
+ 		neighbour[ NW ].s1 = as_uint( heat_map[ neighbour[ NW ].s0 ] );
+ 		neighbour[ N  ].s1 = as_uint( heat_map[ neighbour[ N  ].s0 ] );
+ 		neighbour[ NE ].s1 = as_uint( heat_map[ neighbour[ NE ].s0 ] );
+
 		/* Actual bug location is also the best location until otherwise. */
-		best.x = bug_locus;							/* Position.    */
-		best.y = as_uint( heat_map[ bug_locus ] );	/* temperature. */
+		best.s0 = bug_locus;							/* Position.    */
+		best.s1 = as_uint( heat_map[ bug_locus ] );		/* temperature. */
+
 
 		/* Loop unroll. */
 
-		/** NW **/
-		neighbour.locus = ln * WORLD_WIDTH + cw;
-		neighbour.temperature = heat_map[ neighbour.locus ];
-
-		if (todo == GOTO_MAX_TEMPERATURE) {
-			if (neighbour.temperature > best.temperature)	best = neighbour;
-		}
-		else {	/* todo == GOTO_MIN_TEMPERATURE */
-			if (neighbour.temperature < best.temperature)	best = neighbour;
-		}
-
-		/** N  **/
-		neighbour.locus = ln * WORLD_WIDTH + cc;
-		neighbour.temperature = heat_map[ neighbour.locus ];
-
-		if (todo == GOTO_MAX_TEMPERATURE) {
-			if (neighbour.temperature > best.temperature)	best = neighbour;
-		}
-		else {	/* todo == GOTO_MIN_TEMPERATURE */
-			if (neighbour.temperature < best.temperature)	best = neighbour;
-		}
-
-		/** NE **/
-		neighbour.locus = ln * WORLD_WIDTH + ce;
-		neighbour.temperature = heat_map[ neighbour.locus ];
-
-		if (todo == GOTO_MAX_TEMPERATURE) {
-			if (neighbour.temperature > best.temperature)	best = neighbour;
-		}
-		else {	/* todo == GOTO_MIN_TEMPERATURE */
-			if (neighbour.temperature < best.temperature)	best = neighbour;
-		}
-
-		/** W  **/
-		neighbour.locus = lc * WORLD_WIDTH + cw;
-		neighbour.temperature = heat_map[ neighbour.locus ];
-
-		if (todo == GOTO_MAX_TEMPERATURE) {
-			if (neighbour.temperature > best.temperature)	best = neighbour;
-		}
-		else {	/* todo == GOTO_MIN_TEMPERATURE */
-			if (neighbour.temperature < best.temperature)	best = neighbour;
-		}
-
-		/** E  **/
-		neighbour.locus = lc * WORLD_WIDTH + ce;
-		neighbour.temperature = heat_map[ neighbour.locus ];
-
-		if (todo == GOTO_MAX_TEMPERATURE) {
-			if (neighbour.temperature > best.temperature)	best = neighbour;
-		}
-		else {	/* todo == GOTO_MIN_TEMPERATURE */
-			if (neighbour.temperature < best.temperature)	best = neighbour;
-		}
-
 		/** SW **/
-		neighbour.locus = ls * WORLD_WIDTH + cw;
-		neighbour.temperature = heat_map[ neighbour.locus ];
-
 		if (todo == GOTO_MAX_TEMPERATURE) {
-			if (neighbour.temperature > best.temperature)	best = neighbour;
+			if (as_float( neighbour[ SW ].s1 ) > as_float( best.s1 ))	best = neighbour[ SW ];
+			if (as_float( neighbour[ S  ].s1 ) > as_float( best.s1 ))	best = neighbour[ S  ];
+			if (as_float( neighbour[ SE ].s1 ) > as_float( best.s1 ))	best = neighbour[ SE ];
+			if (as_float( neighbour[ W  ].s1 ) > as_float( best.s1 ))	best = neighbour[ W ];
+			if (as_float( neighbour[ E  ].s1 ) > as_float( best.s1 ))	best = neighbour[ E ];
+			if (as_float( neighbour[ NW ].s1 ) > as_float( best.s1 ))	best = neighbour[ NW ];
+			if (as_float( neighbour[ N  ].s1 ) > as_float( best.s1 ))	best = neighbour[ N  ];
+			if (as_float( neighbour[ NE ].s1 ) > as_float( best.s1 ))	best = neighbour[ NE ];
 		}
 		else {	/* todo == GOTO_MIN_TEMPERATURE */
-			if (neighbour.temperature < best.temperature)	best = neighbour;
-		}
-
-		/** S  **/
-		neighbour.locus = ls * WORLD_WIDTH + cc;
-		neighbour.temperature = heat_map[ neighbour.locus ];
-
-		if (todo == GOTO_MAX_TEMPERATURE) {
-			if (neighbour.temperature > best.temperature)	best = neighbour;
-		}
-		else {	/* todo == GOTO_MIN_TEMPERATURE */
-			if (neighbour.temperature < best.temperature)	best = neighbour;
-		}
-
-		/** SE **/
-		neighbour.locus = ls * WORLD_WIDTH + ce;
-		neighbour.temperature = heat_map[ neighbour.locus ];
-
-			if (todo == GOTO_MAX_TEMPERATURE) {
-			if (neighbour.temperature > best.temperature)	best = neighbour;
-		}
-		else {	/* todo == GOTO_MIN_TEMPERATURE */
-			if (neighbour.temperature < best.temperature)	best = neighbour;
+			if (as_float( neighbour[ SW ].s1 ) < as_float( best.s1 ))	best = neighbour[ SW ];
+			if (as_float( neighbour[ S  ].s1 ) < as_float( best.s1 ))	best = neighbour[ S  ];
+			if (as_float( neighbour[ SE ].s1 ) < as_float( best.s1 ))	best = neighbour[ SE ];
+			if (as_float( neighbour[ W  ].s1 ) < as_float( best.s1 ))	best = neighbour[ W  ];
+			if (as_float( neighbour[ E  ].s1 ) < as_float( best.s1 ))	best = neighbour[ E  ];
+			if (as_float( neighbour[ NW ].s1 ) < as_float( best.s1 ))	best = neighbour[ NW ];
+			if (as_float( neighbour[ N  ].s1 ) < as_float( best.s1 ))	best = neighbour[ N  ];
+			if (as_float( neighbour[ NE ].s1 ) < as_float( best.s1 ))	best = neighbour[ NE ];
 		}
 
 		/* Return, if bug is already in the best local or if new best local is bug free, */
-		if ((best.locus == bug_locus) || HAS_NO_BUG( swarm_map[ best.locus ] )) return best.locus;
+		if ((best.s0 == bug_locus) || HAS_NO_BUG( swarm_map[ best.s0 ] )) return best.s0;
 	}
 
 	/*
