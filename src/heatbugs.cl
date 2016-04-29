@@ -165,7 +165,7 @@ inline uint randomInt( uint min, uint max, __global uint *rng_state )
 
 
 
-inline uint best_Free_Neighbour( int todo, __global float *heat_map, __global uint *swarm_map, __private uint bug_locus )
+inline uint best_Free_Neighbour( int todo, __global float *heat_map, __global uint *swarm_map, __private uint bug_locus, __global uint *rng_state )
 {
 	__private char N_IDX[8] = {0, 1, 2, 3, 4, 5, 6, 7};
 
@@ -290,6 +290,22 @@ inline uint best_Free_Neighbour( int todo, __global float *heat_map, __global ui
 	 * Here: there is a random moving chance, or the best neighbour is not free.
 	 * Try to find any avaiable free place.
 	 * */
+
+	 /*
+	  * Shuffle an index vector so we can pick a random free neighbour
+	  * by checking each by index until find a first free.
+	  * */
+	  for (uint i = 0; i < 8; i++)
+	  {
+	  	  uint rnd = randomInt( i, 8, rng_state );
+
+	  	  if (rnd == i) continue;
+
+	  	  char tmp = N_IDX[ i ];
+	  	  N_IDX[ i ] = N_IDX[ rnd ];
+	  	  N_IDX[ rnd ] = tmp;
+	  }
+
 
 
 
