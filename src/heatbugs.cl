@@ -55,11 +55,13 @@
 
 
 
-
+/* Used to drive what shall happen to the agent at each step. */
 #define GOTO_ANY_FREE			0x00ffffff
 #define GOTO_MAX_TEMPERATURE	0x00ffff00
 #define GOTO_MIN_TEMPERATURE	0x00ff00ff
 
+/* Number of neighboring cell that surround the agent's position. */
+#define NUM_NEIGHBOURS	8
 
 
 /*
@@ -168,10 +170,13 @@ inline uint best_Free_Neighbour( int todo, __global float *heat_map, __global ui
 	__private const uint ce = (cc + 1) % WORLD_WIDTH;					/* Column at East.  */
 	__private const uint cw = (cc + WORLD_WIDTH - 1) % WORLD_WIDTH;		/* Column at West.  */
 
-	__private uint2 best;				/* best.s0 position, best.s1 temperature. */
-	__private uint2 neighbour[ 8 ];		/* neighbour[..].s0 position, neighbour[..].s1, temperature. */
+	/* best.s0 is position, best.s1 is temperature. */
+	__private uint2 best;
+	/* neighbour[..].s0 is position, neighbour[..].s1 is temperature. */
+	__private uint2 neighbour[ NUM_NEIGHBOURS ];
+	/* To index neighbour's. Randomly picks the first free neighbouring cell. */
+	__private uint NEIGHBOUR_IDX[ NUM_NEIGHBOURS ] = {SW, S, SE, W, E, NW, N, NE};
 
-	__private uint NEIGHBOUR_IDX[ 8 ] = {SW, S, SE, W, E, NW, N, NE};
 
 
 	/* Back to vector positions. Used on both, best location and random location. */
@@ -197,15 +202,13 @@ inline uint best_Free_Neighbour( int todo, __global float *heat_map, __global ui
  		neighbour[ N  ].s1 = as_uint( heat_map[ neighbour[ N  ].s0 ] );
  		neighbour[ NE ].s1 = as_uint( heat_map[ neighbour[ NE ].s0 ] );
 
-		/* Actual bug location is also the best location until otherwise. */
-		best.s0 = bug_locus;							/* Position.    */
-		best.s1 = as_uint( heat_map[ bug_locus ] );		/* temperature. */
+ 		/* Actual bug location is also the best location until otherwise. */
+		best.s0 = bug_locus;							/* Bug position.    */
+		best.s1 = as_uint( heat_map[ best.s0 ] );		/* Temperature at bug position. */
 
-
-		/* Loop unroll. */
-
-		/** SW **/
-		if (todo == GOTO_MAX_TEMPERATURE) {
+		/* Loop unroll.  */
+		if (todo == GOTO_MAX_TEMPERATURE)
+		{
 			if (as_float( neighbour[ SW ].s1 ) > as_float( best.s1 ))	best = neighbour[ SW ];
 			if (as_float( neighbour[ S  ].s1 ) > as_float( best.s1 ))	best = neighbour[ S  ];
 			if (as_float( neighbour[ SE ].s1 ) > as_float( best.s1 ))	best = neighbour[ SE ];
@@ -215,7 +218,8 @@ inline uint best_Free_Neighbour( int todo, __global float *heat_map, __global ui
 			if (as_float( neighbour[ N  ].s1 ) > as_float( best.s1 ))	best = neighbour[ N  ];
 			if (as_float( neighbour[ NE ].s1 ) > as_float( best.s1 ))	best = neighbour[ NE ];
 		}
-		else {	/* todo == GOTO_MIN_TEMPERATURE */
+		else	/* todo == GOTO_MIN_TEMPERATURE */
+		{
 			if (as_float( neighbour[ SW ].s1 ) < as_float( best.s1 ))	best = neighbour[ SW ];
 			if (as_float( neighbour[ S  ].s1 ) < as_float( best.s1 ))	best = neighbour[ S  ];
 			if (as_float( neighbour[ SE ].s1 ) < as_float( best.s1 ))	best = neighbour[ SE ];
@@ -228,7 +232,8 @@ inline uint best_Free_Neighbour( int todo, __global float *heat_map, __global ui
 
 		/* Return, if bug is already in the best local or if new best local is bug free, */
 		if ((best.s0 == bug_locus) || HAS_NO_BUG( swarm_map[ best.s0 ] )) return best.s0;
-	}
+	}	/* end_if (todo != GOTO_ANY_FREE) */
+
 
 	/*
 	 * Here: there is a random moving chance, or the best neighbour is not free.
@@ -240,26 +245,45 @@ inline uint best_Free_Neighbour( int todo, __global float *heat_map, __global ui
 	  * pick a random free neighbour by checking each by index until find a
 	  * first free.
 	  * */
-	  for (uint i = 0; i < 8; i++)
-	  {
-	  	  uint rnd = randomInt( i, 8, rng_state );
+	for (uint i = 0; i < NUM_NEIGHBOURS; i++)
+	{
+		uint rnd = randomInt( i, NUM_NEIGHBOURS, rng_state );
 
-	  	  if (rnd == i) continue;
+		if (rnd == i) continue;
 
-	  	  char tmp = N_IDX[ i ];
-	  	  N_IDX[ i ] = N_IDX[ rnd ];
-	  	  N_IDX[ rnd ] = tmp;
-	  }
+		char tmp = N_IDX[ i ];
+		NEIGHBOUR_IDX[ i ] = NEIGHBOUR_IDX[ rnd ];
+		NEIGHBOUR_IDX[ rnd ] = tmp;
+	}
 
-	  /* Loop unroll. */
-	  neighbour.locus =
+	/* Loop unroll. */
 
+	/* Find a first free neighbour. */
+	best.s0 = neighbour[ NEIGHBOUR_IDX[0] ].s0;
+	if (HAS_NO_BUG( swarm_map[ best.s0 ] )) return best.s0;
 
+	best.s0 = neighbour[ NEIGHBOUR_IDX[1] ].s0;
+	if (HAS_NO_BUG( swarm_map[ best.s0 ] )) return best.s0;
 
+	best.s0 = neighbour[ NEIGHBOUR_IDX[2] ].s0;
+	if (HAS_NO_BUG( swarm_map[ best.s0 ] )) return best.s0;
 
+	best.s0 = neighbour[ NEIGHBOUR_IDX[3] ].s0;
+	if (HAS_NO_BUG( swarm_map[ best.s0 ] )) return best.s0;
 
-	return 0;
+	best.s0 = neighbour[ NEIGHBOUR_IDX[4] ].s0;
+	if (HAS_NO_BUG( swarm_map[ best.s0 ] )) return best.s0;
 
+	best.s0 = neighbour[ NEIGHBOUR_IDX[5] ].s0;
+	if (HAS_NO_BUG( swarm_map[ best.s0 ] )) return best.s0;
+
+	best.s0 = neighbour[ NEIGHBOUR_IDX[6] ].s0;
+	if (HAS_NO_BUG( swarm_map[ best.s0 ] )) return best.s0;
+
+	best.s0 = neighbour[ NEIGHBOUR_IDX[7] ].s0;
+	if (HAS_NO_BUG( swarm_map[ best.s0 ] )) return best.s0;
+
+	return bug_locus;
 }
 
 
