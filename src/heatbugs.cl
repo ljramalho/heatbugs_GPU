@@ -398,6 +398,30 @@ __kernel void init_swarm( __global uint *swarm_bugPosition, __global uint *swarm
 
 /*
  * Perform a bug movement in the world.
+ *
+ * Netlogo completely separates the report of the "best" / "random" location,
+ * from the actual bug movement. Only when perform "bug-move", the availability
+ * (status) of the reported location is checked, so an alternate free location,
+ * if exists, is computed if necessary.
+ *
+ * This GPU version of the "bug-move" a.k.a "bug_step", uses the auxiliary
+ * function find_Best_Neighbour(..), that does both at the same time, it checks
+ * for the "winner", a location with max/min temperature that is also free of
+ * bugs, or "any random" free location.
+ *
+ * The function best_Free_Neighbour(..) does its best to mimic netlogo behavior,
+ * by packing the location report and the availability check into the same
+ * function. When executed in série, the returned result is guaranted since
+ * only one bug is processed at a time.
+ *
+ * However the paralell execution in GPU means that a previously free location
+ * may become unavailable, so it is required a second call to the same function,
+ * best_Free_Neighbour(..), this time looking just for any free neighbour (as
+ * if a random moving chance is taking place).
+ * A second call to the the function may be necessary to exactly mimic Netlogo's
+ * behavior, that is, search for a new free location, after the previous one
+ * become occupied by a bug, setted by a concurrent thread.
+ * So, in parallel execution, a 2-step operation may be required.
  * */
 __kernel void bug_step( __global uint *swarm_bugPosition, __global uint *swarm_bugGoto, __global uint *swarm_map,
 						__global float *heat_map, /*__global float *heat_buffer, */
@@ -412,7 +436,6 @@ __kernel void bug_step( __global uint *swarm_bugPosition, __global uint *swarm_b
 	__private uint bug;
 	__private uint new_locus;
 
-	__private uchar trial = NUM_TRIES;
 	__private int todo;
 
 
@@ -430,56 +453,80 @@ __kernel void bug_step( __global uint *swarm_bugPosition, __global uint *swarm_b
 	bug_output_heat = GET_BUG_OUTPUT_HEAT( bug );
 
 	bug_unhappiness = fabs( (float) bug_ideal_temperature - locus_temperature );
+
+	/* Update bug's unhappiness vector. */
 	unhappiness[ bug_idx ] = bug_unhappiness;
+
+
+	if (bug_unhappiness == 0.0f)
+	{
+		heat_map[ bug_locus ] += bug_output_heat;
+		return;
+	}
+
+	/* Here, (bug_unhappiness > 0.0f) */
+
 
 	/* INFO: Mem fence here? */
 
 	/*
-	 * Find the best place for the bug to go. Tricky stuff!
-	 *
-	 * In order to implement netlogo approach, WITHOUT branching in
-	 * OpenCL kernel, that is (in netlogo order) to compute:
-	 * 1) random-move-chance,
-	 * 2) best-patch for (temp < ideal-temp) (when bug is in COLD),
-	 * 3) best patch for (temp >= ideal-temp) (when bug is in HOT),
-	 * the OpenCl kernel select(...) function must be used twice.
-	 *
-	 * A variable is used to hold what to do, (1), (2) or (3). However the
-	 * order must be reversed since (1), when happen, takes precedence over
-	 * (2) or (3), whatever (2) XOR (3) is true or not.
+		Find the best place for the bug to go. Tricky stuff!
+
+		In order to implement netlogo approach, WITHOUT branching in OpenCL
+		kernel, that is (in netlogo order) to compute:
+		1) random-move-chance,
+		2) best-patch for (temp < ideal-temp) (when bug is in COLD),
+		3) best patch for (temp >= ideal-temp) (when bug is in HOT),
+		the OpenCl kernel select(...) function must be used twice.
+
+		A variable is used to hold what to do, (1), (2) or (3). However the
+		order must be reversed since (1), when happen, takes precedence over
+		(2) or (3), whatever (2) XOR (3) is true or not.
+
+		select(a, b, c) implements: 	(c) ? b : a
+	*/
+
+	todo = select( FIND_MIN_TEMPERATURE, FIND_MAX_TEMPERATURE, locus_temperature < bug_ideal_temperature );
+	todo = select( todo, FIND_ANY_FREE, randomFloat( 0, 100, &rng_state[ bug_idx ] ) < BUGS_RANDOM_MOVE_CHANCE );
+
+
+	bug_new_locus = best_Free_Neighbour( todo, heat_map, swarm_map, bug_locus, &rng_state[ bug_idx ] );
+
+
+	/* If bug's current location is already the best one... */
+	if (bug_new_locus == bug_locus)
+	{
+		heat_map[ bug_locus ] += bug_output_heat;
+		return;
+	}
+
+
+	/* Otherwise, try to store the bug in his new 'best' location and return. */
+	new_locus = atomic_cmpxchg( &swarm_map[ bug_new_locus ], EMPTY_CELL, bug );
+
+	if (HAS_NO_BUG( new_locus ))
+	{
+		/* SUCCESS! Reset old bug location. Should be atomic in case another workitem is trying to read. */
+		atomic_xchg( &swarm_map[ bug_locus ], EMPTY_CELL );
+		heat_map[ bug_new_locus ] += bug_output_heat;
+		return;
+	}
+
+
+	/* Here, the best place become unavailable!. */
+
+	/*
+	   Call best_Free_Neighbour(..) function to look just for any free neighbour,
+	   and drop bug_step if it is impossible to find any.
 	 * */
 
-	if (bug_unhappiness > 0.0)
-	{
-		/* select(a, b, c) implements: 	(c) ? b : a */
-		todo = select( FIND_MIN_TEMPERATURE, FIND_MAX_TEMPERATURE, locus_temperature < bug_ideal_temperature );
-		todo = select( todo, FIND_ANY_FREE, randomFloat( 0, 100, &rng_state[ bug_idx ] ) < BUGS_RANDOM_MOVE_CHANCE );
+	todo = FIND_ANY_FREE;
+	bug_new_locus = best_Free_Neighbour( todo, heat_map, swarm_map, bug_locus, &rng_state[ bug_idx ] );
 
-		bug_new_locus = best_Free_Neighbour( todo, heat_map, swarm_map, bug_locus, &rng_state[ bug_idx ] );
 
-		/* Store the bug into the new location. */
-		if (bug_new_locus != bug_locus)
-		{
-			/* It atomically does, the operation:
-				swarm_map[ bug_new_locus ] =
-					( (new_locus = swarm_map[ bug_new_locus ]) == EMPTY_CELL ) ? bug : swarm_map[ bug_new_locus ]; */
-			new_locus = atomic_cmpxchg( &swarm_map[ bug_new_locus ], EMPTY_CELL, bug );
+	swarm_map[ bug_locus ] = 0;
 
-			/*
-				Meanwhile, if best place become not available, just try a second
-				time; recall best_Free_Neighbour(..) function to look just for
-				any free neighbour, and drop agent step if it is impossíble to
-				find any.
-			*/
-			if (HAS_BUG( new_locus ))
-			{
-				todo = FIND_ANY_FREE;
-				bug_new_locus = best_Free_Neighbour( todo, heat_map, swarm_map, bug_locus );
-			}
 
-			swarm_map[ bug_locus ] = 0;
-		}
-	}
 
 	heat_map[ bug_new_locus ] += bug_output_heat;
 
