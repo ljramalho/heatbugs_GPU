@@ -54,11 +54,14 @@
 
 
 
+/* Number of times, the bug_step(..) function should try to move a bug before give up. */
+#define NUM_TRIES	2
+
 
 /* Used to drive what shall happen to the agent at each step. */
-#define GOTO_ANY_FREE			0x00ffffff
-#define GOTO_MAX_TEMPERATURE	0x00ffff00
-#define GOTO_MIN_TEMPERATURE	0x00ff00ff
+#define FIND_ANY_FREE			0x00ffffff
+#define FIND_MAX_TEMPERATURE	0x00ffff00
+#define FIND_MIN_TEMPERATURE	0x00ff00ff
 
 /* Number of neighboring cell that surround the agent's position. */
 #define NUM_NEIGHBOURS	8
@@ -170,7 +173,7 @@ inline uint best_Free_Neighbour( int todo, __global float *heat_map, __global ui
 	__private const uint ce = (cc + 1) % WORLD_WIDTH;					/* Column at East.  */
 	__private const uint cw = (cc + WORLD_WIDTH - 1) % WORLD_WIDTH;		/* Column at West.  */
 
-	/* best.s0 is position, best.s1 is temperature. */
+	/* IMPORTANT best.s0 is position, best.s1 is temperature. */
 	__private uint2 best;
 	/* neighbour[..].s0 is position, neighbour[..].s1 is temperature. */
 	__private uint2 neighbour[ NUM_NEIGHBOURS ];
@@ -179,7 +182,7 @@ inline uint best_Free_Neighbour( int todo, __global float *heat_map, __global ui
 
 
 
-	/* Back to vector positions. Used on both, best location and random location. */
+	/* Compute back the vector positions. Used on both, best location and random location. */
 	neighbour[ SW ].s0 = rs * WORLD_WIDTH + cw;		/* SW neighbour position. */
 	neighbour[ S  ].s0 = rs * WORLD_WIDTH + cc;		/* S  neighbour Position. */
 	neighbour[ SE ].s0 = rs * WORLD_WIDTH + ce;		/* SE neighbour position. */
@@ -190,7 +193,7 @@ inline uint best_Free_Neighbour( int todo, __global float *heat_map, __global ui
 	neighbour[ NE ].s0 = rn * WORLD_WIDTH + ce;		/* NE neighbour position. */
 
 
-	if (todo != GOTO_ANY_FREE)
+	if (todo != FIND_ANY_FREE)
 	{
 		/* Fetch temperature of all neighbours. */
 		neighbour[ SW ].s1 = as_uint( heat_map[ neighbour[ SW ].s0 ] );
@@ -207,7 +210,7 @@ inline uint best_Free_Neighbour( int todo, __global float *heat_map, __global ui
 		best.s1 = as_uint( heat_map[ best.s0 ] );		/* Temperature at bug position. */
 
 		/* Loop unroll.  */
-		if (todo == GOTO_MAX_TEMPERATURE)
+		if (todo == FIND_MAX_TEMPERATURE)
 		{
 			if (as_float( neighbour[ SW ].s1 ) > as_float( best.s1 ))	best = neighbour[ SW ];
 			if (as_float( neighbour[ S  ].s1 ) > as_float( best.s1 ))	best = neighbour[ S  ];
@@ -218,7 +221,7 @@ inline uint best_Free_Neighbour( int todo, __global float *heat_map, __global ui
 			if (as_float( neighbour[ N  ].s1 ) > as_float( best.s1 ))	best = neighbour[ N  ];
 			if (as_float( neighbour[ NE ].s1 ) > as_float( best.s1 ))	best = neighbour[ NE ];
 		}
-		else	/* todo == GOTO_MIN_TEMPERATURE */
+		else	/* todo == FIND_MIN_TEMPERATURE */
 		{
 			if (as_float( neighbour[ SW ].s1 ) < as_float( best.s1 ))	best = neighbour[ SW ];
 			if (as_float( neighbour[ S  ].s1 ) < as_float( best.s1 ))	best = neighbour[ S  ];
@@ -251,7 +254,7 @@ inline uint best_Free_Neighbour( int todo, __global float *heat_map, __global ui
 
 		if (rnd == i) continue;
 
-		char tmp = N_IDX[ i ];
+		char tmp = NEIGHBOUR_IDX[ i ];
 		NEIGHBOUR_IDX[ i ] = NEIGHBOUR_IDX[ rnd ];
 		NEIGHBOUR_IDX[ rnd ] = tmp;
 	}
@@ -285,6 +288,7 @@ inline uint best_Free_Neighbour( int todo, __global float *heat_map, __global ui
 
 	return bug_locus;
 }
+
 
 
 
@@ -406,8 +410,9 @@ __kernel void bug_step( __global uint *swarm_bugPosition, __global uint *swarm_b
 	__private float bug_unhappiness;
 	__private float locus_temperature;
 	__private uint bug;
-	__private uint bug_old;
+	__private uint new_locus;
 
+	__private uchar trial = NUM_TRIES;
 	__private int todo;
 
 
@@ -446,21 +451,37 @@ __kernel void bug_step( __global uint *swarm_bugPosition, __global uint *swarm_b
 
 	if (bug_unhappiness > 0.0)
 	{
-		todo = select( GOTO_MIN_TEMPERATURE, GOTO_MAX_TEMPERATURE, locus_temperature < bug_ideal_temperature );
-		todo = select( todo, GOTO_ANY_FREE, randomFloat( 0, 100, &rng_state[ bug_idx ] ) < BUGS_RANDOM_MOVE_CHANCE );
+		/* select(a, b, c) implements: 	(c) ? b : a */
+		todo = select( FIND_MIN_TEMPERATURE, FIND_MAX_TEMPERATURE, locus_temperature < bug_ideal_temperature );
+		todo = select( todo, FIND_ANY_FREE, randomFloat( 0, 100, &rng_state[ bug_idx ] ) < BUGS_RANDOM_MOVE_CHANCE );
 
-		bug_new_locus = best_Free_Neighbour( todo, heat_map, swarm_map, bug_locus );
+		bug_new_locus = best_Free_Neighbour( todo, heat_map, swarm_map, bug_locus, &rng_state[ bug_idx ] );
 
-		/* Store bug the bug to the new location. */
+		/* Store the bug into the new location. */
 		if (bug_new_locus != bug_locus)
 		{
-			bug_old = atomic_cmpxchg( &swarm_map[ bug_locus ], EMPTY_CELL, bug );
+			/* It atomically does, the operation:
+				swarm_map[ bug_new_locus ] =
+					( (new_locus = swarm_map[ bug_new_locus ]) == EMPTY_CELL ) ? bug : swarm_map[ bug_new_locus ]; */
+			new_locus = atomic_cmpxchg( &swarm_map[ bug_new_locus ], EMPTY_CELL, bug );
+
+			/*
+				Meanwhile, if best place become not available, just try a second
+				time; recall best_Free_Neighbour(..) function to look just for
+				any free neighbour, and drop agent step if it is impossíble to
+				find any.
+			*/
+			if (HAS_BUG( new_locus ))
+			{
+				todo = FIND_ANY_FREE;
+				bug_new_locus = best_Free_Neighbour( todo, heat_map, swarm_map, bug_locus );
+			}
 
 			swarm_map[ bug_locus ] = 0;
 		}
 	}
 
-	heat_map[ bug_locus ] += bug_output_heat;
+	heat_map[ bug_new_locus ] += bug_output_heat;
 
 	return;
 }
