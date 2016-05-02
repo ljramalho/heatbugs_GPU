@@ -513,7 +513,7 @@ __kernel void bug_step( __global uint *swarm_bugPosition, __global uint *swarm_b
 	}
 
 
-	/* Here, the best place become unavailable!. */
+	/* Here, the best place become unavailable!. Repeat the last actions. */
 
 	/*
 	   Call best_Free_Neighbour(..) function to look just for any free neighbour,
@@ -523,11 +523,26 @@ __kernel void bug_step( __global uint *swarm_bugPosition, __global uint *swarm_b
 	todo = FIND_ANY_FREE;
 	bug_new_locus = best_Free_Neighbour( todo, heat_map, swarm_map, bug_locus, &rng_state[ bug_idx ] );
 
+	/* If bug's current location is already the best one... */
+	if (bug_new_location == bug_locus)
+	{
+		heat_map[ bug_locus ] += bug_output_heat;
+		return;
+	}
 
-	swarm_map[ bug_locus ] = 0;
 
+	/* Otherwise, try to store the bug in his new 'random' location and return. */
+	new_locus = atomic_cmpxchg( &swarm_map[ bug_new_locus ], EMPTY_CELL, bug );
 
+	if (HAS_NO_BUG( new_locus ))
+	{
+		/* SUCCESS! Reset old bug location. Should be atomic in case another workitem is trying to read. */
+		atomic_xchg( &swarm_map[ bug_locus ], EMPTY_CELL );
+		heat_map[ bug_new_locus ] += bug_output_heat;
+		return;
+	}
 
+	/* Bug failled to move and atay at current location. */
 	heat_map[ bug_new_locus ] += bug_output_heat;
 
 	return;
