@@ -24,7 +24,8 @@
  * */
 
 /**
- * The following constants are passed to kernel at compile time.
+ * The kernel in this file expect the following preprocessor defines, passed to
+ * kernel at compile time:
  *		INIT_SEED
  *		BUGS_TEMPERATURE_MIN_IDEAL
  *		BUGS_TEMPERATURE_MAX_IDEAL
@@ -53,9 +54,6 @@
 #pragma OPENCL EXTENSION cl_khr_local_int32_extended_atomics : enable
 
 
-
-/* Number of times, the bug_step(..) function should try to move a bug before give up. */
-#define NUM_TRIES	2
 
 
 /* Used to drive what shall happen to the agent at each step. */
@@ -93,6 +91,28 @@
 
 #define GET_BUG_IDEAL_TEMPERATURE( uint_reg ) ( ((uint_reg) & 0xff000000) >> 24 )
 #define GET_BUG_OUTPUT_HEAT( uint_reg ) ( ((uint_reg) & 0x0000ff00) >> 8 )
+
+
+
+/**
+ * @brief Performs integer division return the ceiling instead of the floor if
+ * it is not an exact division.
+ *
+ * @param a Integer numerator.
+ * @param b Integer denominator.
+ * */
+#define DIV_CEIL( a, b ) ( ((a) + (b) - 1) / (b) )
+
+/**
+ * @brief Compute the next multiple of a given divisor which is equal or larger
+ * than a given value.
+ *
+ * Both val and div are assumed to be positive integers.
+ * @param val Minimum value
+ * @param div The return value must be a multiple of the divisor.
+ * */
+ #define NEXT_MULTIPLE( val, div ) ( (val) + (div) - (val) % (div) )
+
 
 
 
@@ -358,13 +378,13 @@ __kernel void init_swarm( __global uint *swarm_bugPosition, __global uint *swarm
 	__private uint bug_old;
 
 
-	const uint bug_idx = get_global_id( 0 );
+	const uint bug_id = get_global_id( 0 );
 
-	if (bug_idx >= BUGS_NUMBER) return;
+	if (bug_id >= BUGS_NUMBER) return;
 
 
-	bug_ideal_temperature = (ushort) randomInt( BUGS_TEMPERATURE_MIN_IDEAL, BUGS_TEMPERATURE_MAX_IDEAL, &rng_state[ bug_idx ] );
-	bug_output_heat = (ushort) randomInt( BUGS_HEAT_MIN_OUTPUT, BUGS_HEAT_MAX_OUTPUT, &rng_state[ bug_idx ] );
+	bug_ideal_temperature = (ushort) randomInt( BUGS_TEMPERATURE_MIN_IDEAL, BUGS_TEMPERATURE_MAX_IDEAL, &rng_state[ bug_id ] );
+	bug_output_heat = (ushort) randomInt( BUGS_HEAT_MIN_OUTPUT, BUGS_HEAT_MAX_OUTPUT, &rng_state[ bug_id ] );
 
 	/* Create a bug. */
 	BUG_NEW( bug_new );
@@ -373,23 +393,25 @@ __kernel void init_swarm( __global uint *swarm_bugPosition, __global uint *swarm
 
 	/* Try, until succeed, to leave a bug in a empty space. */
 	do {
-		bug_locus = randomInt( 0, WORLD_SIZE, &rng_state[ bug_idx ] );
+		bug_locus = randomInt( 0, WORLD_SIZE, &rng_state[ bug_id ] );
 		bug_old = atomic_cmpxchg( &swarm_map[ bug_locus ], EMPTY_CELL, bug_new );
 	} while ( HAS_BUG( bug_old ) );
 
 	barrier( CLK_GLOBAL_MEM_FENCE );	/* All workitems should arrive here before go on. */
 
 	/* Store bug position in the swarm. */
-	swarm_bugPosition[ bug_idx ] = bug_locus;
+	swarm_bugPosition[ bug_id ] = bug_locus;
 	/* Reset... */
-	swarm_bugGoto[ bug_idx ] = 0;
+	swarm_bugGoto[ bug_id ] = 0;
 
 	/*
 	 * Compute initial unhappiness as abs(ideal_temperature - temperature).
 	 * Since world temperature is initially zero, it turns out that initial
 	 * unhappiness = ideal_temperature.
 	 * */
-	unhappiness[ bug_idx ] = (float) bug_ideal_temperature;
+	// REPLACED: unhappiness[ bug_id ] = (float) bug_ideal_temperature;
+	unhappiness[ bug_id ] = convert_float( bug_ideal_temperature );		/* OpenCL type convertion. */
+
 
 	return;
 }
@@ -411,7 +433,7 @@ __kernel void init_swarm( __global uint *swarm_bugPosition, __global uint *swarm
  *
  * The function best_Free_Neighbour(..) does its best to mimic netlogo behavior,
  * by packing the location report and the availability check into the same
- * function. When executed in série, the returned result is guaranted since
+ * function. When executed in sï¿½rie, the returned result is guaranted since
  * only one bug is processed at a time.
  *
  * However the paralell execution in GPU means that a previously free location
@@ -439,12 +461,12 @@ __kernel void bug_step( __global uint *swarm_bugPosition, __global uint *swarm_b
 	__private int todo;
 
 
-	const uint bug_idx = get_global_id( 0 );
+	const uint bug_id = get_global_id( 0 );
 
-	if (bug_idx >= BUGS_NUMBER) return;
+	if (bug_id >= BUGS_NUMBER) return;
 
 
-	bug_locus = swarm_bugPosition[ bug_idx ];
+	bug_locus = swarm_bugPosition[ bug_id ];
 
 	bug = swarm_map[ bug_locus ];
 	locus_temperature = heat_map[ bug_locus ];
@@ -455,7 +477,7 @@ __kernel void bug_step( __global uint *swarm_bugPosition, __global uint *swarm_b
 	bug_unhappiness = fabs( (float) bug_ideal_temperature - locus_temperature );
 
 	/* Update bug's unhappiness vector. */
-	unhappiness[ bug_idx ] = bug_unhappiness;
+	unhappiness[ bug_id ] = bug_unhappiness;
 
 
 	if (bug_unhappiness == 0.0f)
@@ -487,10 +509,10 @@ __kernel void bug_step( __global uint *swarm_bugPosition, __global uint *swarm_b
 	*/
 
 	todo = select( FIND_MIN_TEMPERATURE, FIND_MAX_TEMPERATURE, locus_temperature < bug_ideal_temperature );
-	todo = select( todo, FIND_ANY_FREE, randomFloat( 0, 100, &rng_state[ bug_idx ] ) < BUGS_RANDOM_MOVE_CHANCE );
+	todo = select( todo, FIND_ANY_FREE, randomFloat( 0, 100, &rng_state[ bug_id ] ) < BUGS_RANDOM_MOVE_CHANCE );
 
 
-	bug_new_locus = best_Free_Neighbour( todo, heat_map, swarm_map, bug_locus, &rng_state[ bug_idx ] );
+	bug_new_locus = best_Free_Neighbour( todo, heat_map, swarm_map, bug_locus, &rng_state[ bug_id ] );
 
 
 	/* If bug's current location is already the best one... */
@@ -506,7 +528,7 @@ __kernel void bug_step( __global uint *swarm_bugPosition, __global uint *swarm_b
 
 	if (HAS_NO_BUG( new_locus ))
 	{
-		/* SUCCESS! Reset old bug location. Should be atomic in case another workitem is trying to read. */
+		/* SUCCESS! Reset old bug location. Should be atomic in case another workitem try to read. */
 		atomic_xchg( &swarm_map[ bug_locus ], EMPTY_CELL );
 		heat_map[ bug_new_locus ] += bug_output_heat;
 		return;
@@ -521,7 +543,7 @@ __kernel void bug_step( __global uint *swarm_bugPosition, __global uint *swarm_b
 	 * */
 
 	todo = FIND_ANY_FREE;
-	bug_new_locus = best_Free_Neighbour( todo, heat_map, swarm_map, bug_locus, &rng_state[ bug_idx ] );
+	bug_new_locus = best_Free_Neighbour( todo, heat_map, swarm_map, bug_locus, &rng_state[ bug_id ] );
 
 	/* If bug's current location is already the best one... */
 	if (bug_new_location == bug_locus)
@@ -630,49 +652,121 @@ __kernel void comp_world_heat( __global float *heat_map, __global float *heat_bu
 
 
 
-
-__kernel void mean_unhappiness( __global float *unhappiness, __local float *lstore, __global float *result )
+/*
+ *
+ */
+__kernel void mean_unhappiness_step1( __global float *unhappiness, __local float *partial_sum, __global float *reduce_result )
 {
-	__private accumulator = INFINITI;
+	const uint glb_bug_id = get_global_id( 0 );
+	const uint lcl_bug_id = get_local_id( 0 );
+	const uint glb_size = get_global_size( 0 );
+	const uint lcl_size = get_local_size( 0 );
 
-	const uint bug_idx = get_global_id( 0 );
+	__private uint serialCount, bug_id, iter;
+	__private float sum = 0.0f;
 
-	if (bug_idx >= BUGS_NUMBER) return;
+	/*
+	   The size of vector unhappiness is the number of bugs (BUGS_NUMBER).
+	   So we must take care of both cases, when BUGS_NUMBER > global_size, and
+	   when global_size > BUGS_NUMBER.
+	   This is what happen in the next loop...
 
+	   When: (BUGS_NUMBER < glb_size) -> serialCount = 1
+	   			sum[0 .. BUGS_NUMBER - 1] = unhappiness[0 .. BUGS_NUMBER - 1]
+	   			sum[BUGS_NUMBER .. glb_size - 1] = 0
+
+	   When: (BUGS_NUMBER == glb_size) -> serialCount = 1
+	   			sum[0 .. glb_size - 1] = unhappiness[0 .. glb_size - 1]
+
+	   When: (glb_size < BUGS_NUMBER < 2*glb_size) -> serialCount = 2
+	   			sum[0 .. BUGS_NUMBER - glb_size - 1] = unhappiness[0 .. BUGS_NUMBER - glb_size - 1] + unhappiness[glb_size .. BUGS_NUMBER - 1]
+	   			sum[BUGS_NUMBER - glb_size .. glb_size - 1] = unhappiness[BUGS_NUMBER - glb_size .. glb_size - 1]
+
+	   Where each indexed sum, is a work-item | lcl_bug_id, private variable 'sum'.
+	*/
+
+	/* Serial sum. */
+	serialCount = DIV_CEIL( BUGS_NUMBER, glb_size );
+
+	for (iter = 0; iter < serialCount; iter++)
+	{
+		bug_id = iter * glb_size + glb_bug_id;
+
+		if (bug_id < BUGS_NUMBER)
+			sum += unhappiness[ bug_id ];
+	}
+
+	/* Store sum in local memory. */
+	partial_sums[ lcl_bug_id ] = sum;
+
+	/* Wait for all workitems to perform previous operations. */
+	barrier( CLK_LOCAL_MEM_FENCE );
+
+
+	/* Reduce */
+	for (iter = lcl_size / 2; iter > 0; iter >>= 1)
+	{
+		if (lcl_bug_id < iter)
+		{
+			partial_sums[ lcl_bug_id ] += partial_sums[ lcl_bug_id + iter ];
+		}
+		barrier( CLK_LOCAL_MEM_FENCE );
+	}
+
+	/* Put in global memory */
+	if (lcl_bug_id == 0) {
+		reduce_result[ get_group_id(0) ] = partial_sums[0];
+	}
+
+	return;
+}
+
+
+
+
+
+/**
+ * @brief Grass reduction kernel, part 2.
+ *
+ * @param reduce_grass_global Global level grass counts.
+ * @param partial_sums Workgroup level (shared memory) grass counts.
+ * @param stats Final grass count.
+ * */
+ __kernel void reduce_grass2(
+			__global grassreduce_uintx *reduce_grass_global,
+			__local grassreduce_uintx *partial_sums,
+			__global PPStatisticsOcl *stats) {
+
+	/* Global and local work-item IDs */
+	size_t lid = get_local_id(0);
+	size_t group_size = get_local_size(0);
+
+	/* Load partial sum in local memory */
+	if (lid < REDUCE_GRASS_NUM_WORKGROUPS)
+		partial_sums[lid] = reduce_grass_global[lid];
+	else
+		partial_sums[lid] = 0;
+
+	/* Wait for all work items to perform previous operation */
+	barrier(CLK_LOCAL_MEM_FENCE);
+
+	/* Reduce */
+	for (int i = group_size / 2; i > 0; i >>= 1) {
+		if (lid < i) {
+			partial_sums[lid] += partial_sums[lid + i];
+		}
+		barrier(CLK_LOCAL_MEM_FENCE);
+	}
+
+	/* Put in global memory */
+	if (lid == 0) {
+		stats[0].grass = VW_GRASSREDUCE_SUM(partial_sums[0]);
+	}
 
 }
 
 
 
-__kernel void reduce(__global float* buffer, __local float* scratch, __const int length, __global float* result) {
-
-  int global_index = get_global_id(0);
-  float accumulator = INFINITY;
-  // Loop sequentially over chunks of input vector
-  while (global_index < length) {
-    float element = buffer[global_index];
-    accumulator = (accumulator < element) ? accumulator : element;
-    global_index += get_global_size(0);
-  }
-
-  // Perform parallel reduction
-  int local_index = get_local_id(0);
-  scratch[local_index] = accumulator;
-  barrier(CLK_LOCAL_MEM_FENCE);
-  for(int offset = get_local_size(0) / 2;
-      offset > 0;
-      offset = offset / 2) {
-    if (local_index < offset) {
-      float other = scratch[local_index + offset];
-      float mine = scratch[local_index];
-      scratch[local_index] = (mine < other) ? mine : other;
-    }
-    barrier(CLK_LOCAL_MEM_FENCE);
-  }
-  if (local_index == 0) {
-    result[get_group_id(0)] = scratch[0];
-  }
-}
 /*
 __kernel void test( __global int *vSeeds )
 {
