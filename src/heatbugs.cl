@@ -655,14 +655,14 @@ __kernel void comp_world_heat( __global float *heat_map, __global float *heat_bu
 /*
  *
  */
-__kernel void unhappiness_step1_reduce( __global float *unhappiness, __local float *partial_sum )
+__kernel void unhappiness_step1_reduce( __global float *unhappiness, __local float *partial_sums )
 {
-	const uint glb_bug_id = get_global_id( 0 );
-	const uint lcl_bug_id = get_local_id( 0 );
-	const uint glb_size = get_global_size( 0 );
-	const uint lcl_size = get_local_size( 0 );
+	const uint gid = get_global_id( 0 );
+	const uint lid = get_local_id( 0 );
+	const uint global_size = get_global_size( 0 );
+	const uint group_size = get_local_size( 0 );
 
-	__private uint serialCount, bug_id, iter;
+	__private uint serialCount, index, iter;
 	__private float sum = 0.0f;
 
 	/*
@@ -671,51 +671,50 @@ __kernel void unhappiness_step1_reduce( __global float *unhappiness, __local flo
 	   when global_size > BUGS_NUMBER.
 	   This is what happen in the next loop...
 
-	   When: (BUGS_NUMBER < glb_size) -> serialCount = 1
+	   When: (BUGS_NUMBER < global_size) -> serialCount = 1
 	   			sum[0 .. BUGS_NUMBER - 1] = unhappiness[0 .. BUGS_NUMBER - 1]
-	   			sum[BUGS_NUMBER .. glb_size - 1] = 0
+	   			sum[BUGS_NUMBER .. global_size - 1] = 0
 
-	   When: (BUGS_NUMBER == glb_size) -> serialCount = 1
-	   			sum[0 .. glb_size - 1] = unhappiness[0 .. glb_size - 1]
+	   When: (BUGS_NUMBER == global_size) -> serialCount = 1
+	   			sum[0 .. global_size - 1] = unhappiness[0 .. global_size - 1]
 
-	   When: (glb_size < BUGS_NUMBER < 2*glb_size) -> serialCount = 2
-	   			sum[0 .. BUGS_NUMBER - glb_size - 1] = unhappiness[0 .. BUGS_NUMBER - glb_size - 1] + unhappiness[glb_size .. BUGS_NUMBER - 1]
-	   			sum[BUGS_NUMBER - glb_size .. glb_size - 1] = unhappiness[BUGS_NUMBER - glb_size .. glb_size - 1]
+	   When: (global_size < BUGS_NUMBER < 2*global_size) -> serialCount = 2
+	   			sum[0 .. BUGS_NUMBER - global_size - 1] = unhappiness[0 .. BUGS_NUMBER - global_size - 1] + unhappiness[global_size .. BUGS_NUMBER - 1]
+	   			sum[BUGS_NUMBER - global_size .. global_size - 1] = unhappiness[BUGS_NUMBER - global_size .. global_size - 1]
 
-	   Where each indexed sum, is a work-item | lcl_bug_id, private variable 'sum'.
+	   Where each indexed sum, is a work-item | lid, private variable 'sum'.
 	*/
 
 	/* Serial sum. */
-	serialCount = DIV_CEIL( BUGS_NUMBER, glb_size );
+	serialCount = DIV_CEIL( BUGS_NUMBER, global_size );
 
 	for (iter = 0; iter < serialCount; iter++)
 	{
-		bug_id = iter * glb_size + glb_bug_id;
+		index = iter * global_size + gid;
 
-		if (bug_id < BUGS_NUMBER)
-			sum += unhappiness[ bug_id ];
+		if (index < BUGS_NUMBER)
+			sum += unhappiness[ index ];
 	}
 
 	/* Store sum in local memory. */
-	partial_sums[ lcl_bug_id ] = sum;
+	partial_sums[ lid ] = sum;
 
 	/* Wait for all workitems to perform previous operations. */
 	barrier( CLK_LOCAL_MEM_FENCE );
 
 
 	/* Reduce */
-	for (iter = lcl_size / 2; iter > 0; iter >>= 1)
+	for (iter = group_size / 2; iter > 0; iter >>= 1)
 	{
-		if (lcl_bug_id < iter)
-		{
-			partial_sums[ lcl_bug_id ] += partial_sums[ lcl_bug_id + iter ];
+		if (lid < iter)	{
+			partial_sums[ lid ] += partial_sums[ lid + iter ];
 		}
 		barrier( CLK_LOCAL_MEM_FENCE );
 	}
 
 	/* Put in back in global memory and reuse the unhappiness vector. */
-	if (lcl_bug_id == 0) {
-		unhappiness[ get_group_id(0) ] = partial_sums[0];
+	if (lid == 0) {
+		unhappiness[ get_group_id( 0 ) ] = partial_sums[ 0 ];
 	}
 
 	return;
@@ -723,60 +722,38 @@ __kernel void unhappiness_step1_reduce( __global float *unhappiness, __local flo
 
 
 
-__kernel void unhappiness_step2_mean( __global float *unhappiness, __local float *partial_sum, __global float *mean )
+__kernel void unhappiness_step2_mean( __global float *unhappiness, __local float *partial_sums, __global float *mean )
 {
-	const uint glb_bug_id = get_global_id( 0 );
-	const uint lcl_bug_id = get_local_id( 0 );
+	__private uint iter;
 
 
-}
+	const uint gid = get_global_id( 0 );
+	const uint lid = get_local_id( 0 );
 
-
-
-
-/**
- * */
- __kernel void reduce_grass2( __global grassreduce_uintx *reduce_grass_global,
-			__local grassreduce_uintx *partial_sums,
-			__global PPStatisticsOcl *stats) {
-
-	/* Global and local work-item IDs */
-	size_t lid = get_local_id(0);
-	size_t group_size = get_local_size(0);
 
 	/* Load partial sum in local memory */
-	if (lid < REDUCE_GRASS_NUM_WORKGROUPS)
-		partial_sums[lid] = reduce_grass_global[lid];
-	else
-		partial_sums[lid] = 0;
+//	if (lid < REDUCE_GRASS_NUM_WORKGROUPS)
+//		partial_sums[ lid ] = unhappiness[ lid ];
+//	else
+//		partial_sums[ lid ] = 0;
 
-	/* Wait for all work items to perform previous operation */
-	barrier(CLK_LOCAL_MEM_FENCE);
+	partial_sums[ lid ] = select( 0.0f, unhappiness[ lid ], lid < REDUCE_GRASS_NUM_WORKGROUPS );
 
-	/* Reduce */
-	for (int i = group_size / 2; i > 0; i >>= 1) {
-		if (lid < i) {
-			partial_sums[lid] += partial_sums[lid + i];
+	barrier( CLK_LOCAL_MEM_FENCE );
+
+	/* Further reduce. */
+	for (iter = group_size / 2; iter > 0; iter >>= 1)
+	{
+		if (lid < iter)	{
+			partial_sums[ lid ] += partial_sums[ lid + iter ];
 		}
-		barrier(CLK_LOCAL_MEM_FENCE);
+		barrier( CLK_LOCAL_MEM_FENCE );
 	}
 
-	/* Put in global memory */
+	/* Compute average and put final result in global memory. */
 	if (lid == 0) {
-		stats[0].grass = VW_GRASSREDUCE_SUM(partial_sums[0]);
+		*mean = partial_sums[ 0 ] / BUGS_NUMBER;
 	}
 
+	return;
 }
-
-
-
-/*
-__kernel void test( __global int *vSeeds )
-{
-	const int gid = get_global_id( 0 );
-
-	if (gid < BUGS_NUM) {
-		vSeeds[gid] += 2;
-	}
-}
-*/
