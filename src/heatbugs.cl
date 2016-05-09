@@ -25,7 +25,8 @@
 
 /**
  * The kernel in this file expect the following preprocessor defines, passed to
- * kernel at compile time:
+ * kernel at compile time with -D option:
+ *
  *		INIT_SEED
  *		BUGS_TEMPERATURE_MIN_IDEAL
  *		BUGS_TEMPERATURE_MAX_IDEAL
