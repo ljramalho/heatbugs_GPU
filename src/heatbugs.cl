@@ -55,6 +55,8 @@
 #pragma OPENCL EXTENSION cl_khr_local_int32_extended_atomics : enable
 
 
+/* TODO: To be deleted */
+#define UNHAPP_REDOX_S2_NUM_WORKGROUPS 32
 
 
 /* Used to drive what shall happen to the agent at each step. */
@@ -356,9 +358,9 @@ __kernel void init_maps( __global uint *swarm_map, __global float *heat_map, __g
 
 	if (gid >= WORLD_SIZE) return;
 
-	swarm_map[ gid ] = 0;
-	heat_map[ gid ] = 0.0;
-	heat_buffer[ gid ] = 0.0;
+	swarm_map[ gid ] = 0;			/* Clean all bugs from the map. */
+	heat_map[ gid ] = 0.0;			/* Reset all temperatures from map. */
+	heat_buffer[ gid ] = 0.0;		/* Reset all temperatures from buffer. */
 
 	return;
 }
@@ -547,7 +549,7 @@ __kernel void bug_step( __global uint *swarm_bugPosition, __global uint *swarm_b
 	bug_new_locus = best_Free_Neighbour( todo, heat_map, swarm_map, bug_locus, &rng_state[ bug_id ] );
 
 	/* If bug's current location is already the best one... */
-	if (bug_new_location == bug_locus)
+	if (bug_new_locus == bug_locus)
 	{
 		heat_map[ bug_locus ] += bug_output_heat;
 		return;
@@ -723,13 +725,13 @@ __kernel void unhappiness_step1_reduce( __global float *unhappiness, __local flo
 
 
 
-__kernel void unhappiness_step2_average( __global float *unhappiness, __local float *partial_sums, __global float *mean )
+__kernel void unhappiness_step2_average( __global float *unhappiness, __local float *partial_sums, __global float *unhapp_average )
 {
 	__private uint iter;
 
 
-	const uint gid = get_global_id( 0 );
 	const uint lid = get_local_id( 0 );
+	const uint group_size = get_local_size( 0 );
 
 
 	/* Load partial sum in local memory */
@@ -738,7 +740,7 @@ __kernel void unhappiness_step2_average( __global float *unhappiness, __local fl
 //	else
 //		partial_sums[ lid ] = 0;
 
-	partial_sums[ lid ] = select( 0.0f, unhappiness[ lid ], lid < REDUCE_GRASS_NUM_WORKGROUPS );
+	partial_sums[ lid ] = select( 0.0f, unhappiness[ lid ], lid < UNHAPP_REDOX_S2_NUM_WORKGROUPS );
 
 	barrier( CLK_LOCAL_MEM_FENCE );
 
@@ -753,7 +755,7 @@ __kernel void unhappiness_step2_average( __global float *unhappiness, __local fl
 
 	/* Compute average and put final result in global memory. */
 	if (lid == 0) {
-		*mean = partial_sums[ 0 ] / BUGS_NUMBER;
+		*unhapp_average = partial_sums[ 0 ] / BUGS_NUMBER;
 	}
 
 	return;

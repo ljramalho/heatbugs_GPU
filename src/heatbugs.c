@@ -75,10 +75,10 @@ typedef struct hb_kernels {
 	CCLKernel *init_random;				/* kernel: Initiate random seeds. */
 	CCLKernel *init_maps;				/* kernel: Initiate heat map. */
 	CCLKernel *init_swarm;				/* kernel: Initiate the world of bugs. */
-	CCLKernel *comp_world_heat;			/* kernel: Compute world heat, diffusion then evaporation. */
 	CCLKernel *bug_step;				/* kernel: Perform a new bug movement. */
-	CCLKernel *unhappiness;				/* kernel: compute unhappiness. */
-	CCLKernel *test;
+	CCLKernel *comp_world_heat;			/* kernel: Compute world heat, diffusion then evaporation. */
+	CCLKernel *unhapp_stp1_reduce;		/* kernel: Reduce (sum) the unhappiness vector. */
+	CCLKernel *unhapp_stp2_average;		/* kernel: Further reduce the unhappiness vector and compute average. */
 } HBKernels_t;
 
 /** Global work sizes for all kernels. */
@@ -86,10 +86,10 @@ typedef struct hb_global_work_sizes	{
 	size_t init_random[ DIMS_1 ];
 	size_t init_maps[ DIMS_1 ];
 	size_t init_swarm[ DIMS_1 ];
+	size_t bug_step[ DIMS_1 ];
 	size_t comp_world_heat[ DIMS_2 ];
-	size_t bug_step;
-	size_t unhappiness;
-	size_t test;
+	size_t unhapp_stp1_reduce[ DIMS_1 ];
+	size_t unhapp_stp2_average[ DIMS_1 ];
 } HBGlobalWorkSizes_t;
 
 /* Local work sizes for all kernels. */
@@ -97,47 +97,53 @@ typedef struct hb_local_work_sizes	{
 	size_t init_random[ DIMS_1 ];
 	size_t init_maps[ DIMS_1 ];
 	size_t init_swarm[ DIMS_1 ];
+	size_t bug_step[ DIMS_1 ];
 	size_t comp_world_heat[ DIMS_2 ];
-	size_t bug_step;
-	size_t unhappiness;
-	size_t test;
+	size_t unhapp_stp1_reduce[ DIMS_1 ];
+	size_t unhapp_stp2_average[ DIMS_1 ];
 } HBLocalWorkSizes_t;
 
 
-/** Host and Device Buffers. */
-typedef struct hb_buffers {
+/** Host Buffers. */
+typedef struct hb_host_buffers {
+	/** Random seeds buffer. */
+	cl_uint *rng_state;						/* DEBUG: (to remove). */
+	/** The bug's position in the swarm_map, (swarm_bugPosition) and (swarm_bugGoto). */
+	cl_uint *swarm[2];
+	/** It's the bugs map. Each cell is: 'ideal-Temperature':8bit 'bug':1bit 'output_heat':7bit. */
+	cl_uint *swarm_map;
+	/**Temperature map (heat_map) & the buffer (heat_buffer). */
+	cl_float *heat_map[2];					/* DEBUG: (to remove). */
+	/**The Unhappiness vector. */
+	cl_float *unhappiness;
+	/** Unhappiness average. The expected result at the end of each iteration. */
+	cl_float *unhapp_average;
+} HBHostBuffers_t;
 
-	/** HOST: Random seeds buffer. */
-	cl_uint *hst_rng_state;						/* DEBUG: (to remove). */
-	/** HOST: Swarm, the bugs position in the map. */
-	cl_uint *hst_swarm[2];
-	/** HOST: It's the bugs map. Each cell is: 'ideal-Temperature':8bit 'bug':1bit 'output_heat':7bit. */
-	cl_uint *hst_swarm_map;
-	/** HOST: Temperature map & the buffer. */
-	cl_float *hst_heat_map[2];					/* DEBUG: (to remove). */
-	/** HOST: To get the Unhappiness. */
-	cl_float *hst_unhappiness;
-
+/** Device buffers. */
+typedef struct hb_device_buffers {
 	/** DEVICE: Random seeds buffer. */
-	CCLBuffer *dev_rng_state;
-	/** DEVICE: Swarm, the bugs position in the map. */
-	CCLBuffer *dev_swarm[2];
+	CCLBuffer *rng_state;
+	/** DEVICE: The bug's position in the swarm_map, (swarm_bugPosition) and (swarm_bugGoto). */
+	CCLBuffer *swarm[2];
 	/** DEVICE: It's the bugs map. Each cell is: 'ideal-Temperature':8bit 'bug':1bit 'output_heat':7bit. */
-	CCLBuffer *dev_swarm_map;
-	/** DEVICE: temperature map & the buffer. */
-	CCLBuffer *dev_heat_map[2];
-	/** DEVICE: To compute bugs unhappiness. */
-	CCLBuffer *dev_unhappiness;
+	CCLBuffer *swarm_map;
+	/** DEVICE: temperature map (heat_map) & the buffer (heat_buffer). */
+	CCLBuffer *heat_map[2];
+	/** DEVICE: The unhappiness vector. */
+	CCLBuffer *unhappiness;
+	/** Unhappiness average. The expected result at the end of each iteration. */
+	CCLBuffer *unhapp_average;
+} HBDeviceBuffers_t;
 
-} HBBuffers_t;
-
-/** Buffers sizes. */
+/** Buffers sizes. Sizes are common to host and device buffers. */
 typedef struct hb_buffers_size {
 	size_t rng_state;
 	size_t swarm;
 	size_t swarm_map;
 	size_t heat_map;
 	size_t unhappiness;
+	size_t unhapp_average;
 } HBBuffersSize_t;
 
 
@@ -377,7 +383,7 @@ error_handler:
 }
 
 
-static void setupBuffers( HBBuffers_t *const buf, HBBuffersSize_t *const bufsz, const OCLObjects_t *const oclobj, const parameters_t *const params, GError **err )
+static void setupBuffers( HBHostBuffers_t *const hst_buff, HBDeviceBuffers_t *const dev_buff, HBBuffersSize_t *const bufsz, const OCLObjects_t *const oclobj, const parameters_t *const params, GError **err )
 {
 	GError *err_setbuf = NULL;
 
@@ -387,11 +393,11 @@ static void setupBuffers( HBBuffers_t *const buf, HBBuffersSize_t *const bufsz, 
 	bufsz->rng_state = params->bugs_number * sizeof( cl_uint );
 
 	/* DEBUG: (to remove) Allocate vector for random seeds in host memory. */
-	buf->hst_rng_state = (cl_uint *) malloc( bufsz->rng_state );
-	ccl_if_err_create_goto( *err, HB_ERROR, buf->hst_rng_state == NULL, HB_MALLOC_FAILURE, error_handler, "Unable to allocate host memory for random seeds/states." );
+	hst_buff->rng_state = (cl_uint *) malloc( bufsz->rng_state );
+	ccl_if_err_create_goto( *err, HB_ERROR, hst_buff->rng_state == NULL, HB_MALLOC_FAILURE, error_handler, "Unable to allocate host memory for random seeds/states." );
 
 	/* Allocate vector of random seeds in device memory. */
-	buf->dev_rng_state = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE, bufsz->rng_state, NULL, &err_setbuf );
+	dev_buff->rng_state = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE, bufsz->rng_state, NULL, &err_setbuf );
 	ccl_if_err_propagate_goto( err, err_setbuf, error_handler );
 
 
@@ -399,16 +405,16 @@ static void setupBuffers( HBBuffers_t *const buf, HBBuffersSize_t *const bufsz, 
 
 	bufsz->swarm = params->bugs_number * sizeof( cl_uint );
 
-	buf->hst_swarm[0] = (cl_uint *) malloc( bufsz->swarm );
-	ccl_if_err_create_goto( *err, HB_ERROR, buf->hst_swarm[0] == NULL, HB_MALLOC_FAILURE, error_handler, "Unabble to allocate host memory for swarm 0.");
+	hst_buff->swarm[0] = (cl_uint *) malloc( bufsz->swarm );
+	ccl_if_err_create_goto( *err, HB_ERROR, hst_buff->swarm[0] == NULL, HB_MALLOC_FAILURE, error_handler, "Unabble to allocate host memory for swarm 0.");
 
-	buf->hst_swarm[1] = (cl_uint *) malloc( bufsz->swarm );
-	ccl_if_err_create_goto( *err, HB_ERROR, buf->hst_swarm[1] == NULL, HB_MALLOC_FAILURE, error_handler, "Unabble to allocate host memory for swarm 1.");
+	hst_buff->swarm[1] = (cl_uint *) malloc( bufsz->swarm );
+	ccl_if_err_create_goto( *err, HB_ERROR, hst_buff->swarm[1] == NULL, HB_MALLOC_FAILURE, error_handler, "Unabble to allocate host memory for swarm 1.");
 
-	buf->dev_swarm[0] = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE, bufsz->swarm, NULL, &err_setbuf );
+	dev_buff->swarm[0] = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE, bufsz->swarm, NULL, &err_setbuf );
 	ccl_if_err_propagate_goto( err, err_setbuf, error_handler );
 
-	buf->dev_swarm[1] = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE, bufsz->swarm, NULL, &err_setbuf );
+	dev_buff->swarm[1] = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE, bufsz->swarm, NULL, &err_setbuf );
 	ccl_if_err_propagate_goto( err, err_setbuf, error_handler );
 
 
@@ -417,11 +423,11 @@ static void setupBuffers( HBBuffers_t *const buf, HBBuffersSize_t *const bufsz, 
 	bufsz->swarm_map = params->world_size * sizeof( cl_uint );
 
 	/* DEBUG: (to remove) Allocate vector for the swarm map in host memory. */
-	buf->hst_swarm_map = (cl_uint *) malloc( bufsz->swarm_map );
-	ccl_if_err_create_goto( *err, HB_ERROR, buf->hst_swarm_map == NULL, HB_MALLOC_FAILURE, error_handler, "Unable to allocate host memory for swarm map." );
+	hst_buff->swarm_map = (cl_uint *) malloc( bufsz->swarm_map );
+	ccl_if_err_create_goto( *err, HB_ERROR, hst_buff->swarm_map == NULL, HB_MALLOC_FAILURE, error_handler, "Unable to allocate host memory for swarm map." );
 
 	/* Allocate vector for the swarm map in device memory. */
-	buf->dev_swarm_map = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE, bufsz->swarm_map, NULL, &err_setbuf );
+	dev_buff->swarm_map = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE, bufsz->swarm_map, NULL, &err_setbuf );
 	ccl_if_err_propagate_goto( err, err_setbuf, error_handler );
 
 
@@ -430,18 +436,18 @@ static void setupBuffers( HBBuffers_t *const buf, HBBuffersSize_t *const bufsz, 
 	bufsz->heat_map = params->world_size * sizeof( cl_float );
 
 	/* DEBUG: (to remove) Allocate temperature vector in host memory. */
-	buf->hst_heat_map[0] = (cl_float *) malloc( bufsz->heat_map );
-	ccl_if_err_create_goto( *err, HB_ERROR, buf->hst_heat_map[0] == NULL, HB_MALLOC_FAILURE, error_handler, "Unable to allocate host memory for temperature / heat map 1." );
+	hst_buff->heat_map[0] = (cl_float *) malloc( bufsz->heat_map );
+	ccl_if_err_create_goto( *err, HB_ERROR, hst_buff->heat_map[0] == NULL, HB_MALLOC_FAILURE, error_handler, "Unable to allocate host memory for temperature / heat map 1." );
 
 	/* DEBUG: (to remove) Allocate temperature vector in host memory. */
-	buf->hst_heat_map[1] = (cl_float *) malloc( bufsz->heat_map );
-	ccl_if_err_create_goto( *err, HB_ERROR, buf->hst_heat_map[1] == NULL, HB_MALLOC_FAILURE, error_handler, "Unable to allocate host memory for temperature / heat map 2." );
+	hst_buff->heat_map[1] = (cl_float *) malloc( bufsz->heat_map );
+	ccl_if_err_create_goto( *err, HB_ERROR, hst_buff->heat_map[1] == NULL, HB_MALLOC_FAILURE, error_handler, "Unable to allocate host memory for temperature / heat map 2." );
 
 	/* Allocate two vectors of temperature maps in device memory, one is used for double buffer. */
-	buf->dev_heat_map[0] = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE, bufsz->heat_map, NULL, &err_setbuf );
+	dev_buff->heat_map[0] = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE, bufsz->heat_map, NULL, &err_setbuf );
 	ccl_if_err_propagate_goto( err, err_setbuf, error_handler );
 
-	buf->dev_heat_map[1] = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE, bufsz->heat_map, NULL, &err_setbuf );
+	dev_buff->heat_map[1] = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE, bufsz->heat_map, NULL, &err_setbuf );
 	ccl_if_err_propagate_goto( err, err_setbuf, error_handler );
 
 
@@ -449,12 +455,22 @@ static void setupBuffers( HBBuffers_t *const buf, HBBuffersSize_t *const bufsz, 
 
 	bufsz->unhappiness = params->bugs_number * sizeof( cl_float );
 
-	buf->hst_unhappiness = (cl_float *) malloc( bufsz->unhappiness );
-	ccl_if_err_create_goto( *err, HB_ERROR, buf->hst_unhappiness == NULL, HB_MALLOC_FAILURE, error_handler, "Unable to allocate host memory for bugs unhappiness." );
+	hst_buff->unhappiness = (cl_float *) malloc( bufsz->unhappiness );
+	ccl_if_err_create_goto( *err, HB_ERROR, hst_buff->unhappiness == NULL, HB_MALLOC_FAILURE, error_handler, "Unable to allocate host memory for bugs unhappiness." );
 
-	buf->dev_unhappiness = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE, bufsz->unhappiness, NULL, &err_setbuf );
+	dev_buff->unhappiness = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE, bufsz->unhappiness, NULL, &err_setbuf );
 	ccl_if_err_propagate_goto( err, err_setbuf, error_handler );
 
+
+	/** UNHAPPINESS AVERAGE */
+
+	bufsz->unhapp_average = sizeof( cl_float );
+
+	hst_buff->unhapp_average = (cl_float *) malloc( bufsz->unhapp_average );
+	ccl_if_err_create_goto( *err, HB_ERROR, hst_buff->unhapp_average == NULL, HB_MALLOC_FAILURE, error_handler, "Unable to allocate host memory for bugs unhappiness average." );
+
+	dev_buff->unhapp_average = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE, bufsz->unhapp_average, NULL, &err_setbuf );
+	ccl_if_err_propagate_goto( err, err_setbuf, error_handler );
 
 
 error_handler:
@@ -467,7 +483,7 @@ error_handler:
 /**
  *	Run all init kernels.
  *	*/
-static inline void initiate( HBKernels_t *const krnl, HBGlobalWorkSizes_t *const gws, HBLocalWorkSizes_t *const lws, OCLObjects_t *const oclobj, HBBuffers_t *const buf, HBBuffersSize_t *const bufsz, parameters_t *const params,  GError **err )
+static inline void initiate( HBKernels_t *const krnl, HBGlobalWorkSizes_t *const gws, HBLocalWorkSizes_t *const lws, OCLObjects_t *const oclobj, HBDeviceBuffers_t *const dev_buff, HBHostBuffers_t *const hst_buff, HBBuffersSize_t *const bufsz, parameters_t *const params,  GError **err )
 {
 	GError *err_init = NULL;
 
@@ -481,7 +497,7 @@ static inline void initiate( HBKernels_t *const krnl, HBGlobalWorkSizes_t *const
 
 	printf( "Init random:\n\tgws = %zu; lws = %zu\n", gws->init_random[0], lws->init_random[0] );
 
-	ccl_kernel_set_arg( krnl->init_random, 0, buf->dev_rng_state );
+	ccl_kernel_set_arg( krnl->init_random, 0, dev_buff->rng_state );
 
 	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->init_random, oclobj->queue, DIMS_1, NULL, gws->init_random, lws->init_random, &ewl, &err_init );
 	ccl_if_err_propagate_goto( err, err_init, error_handler );
@@ -492,7 +508,7 @@ static inline void initiate( HBKernels_t *const krnl, HBGlobalWorkSizes_t *const
 
 	/* Read GPU generated seeds/gen_states, after wait for kernel termination. */
 
-	evt_rdwr = ccl_buffer_enqueue_read( buf->dev_rng_state, oclobj->queue, NON_BLOCK, 0, bufsz->rng_state, buf->hst_rng_state, &ewl, &err_init );
+	evt_rdwr = ccl_buffer_enqueue_read( dev_buff->rng_state, oclobj->queue, NON_BLOCK, 0, bufsz->rng_state, hst_buff->rng_state, &ewl, &err_init );
 	ccl_if_err_propagate_goto( err, err_init, error_handler );
 
 	/* Add read event to the wait list. */
@@ -506,7 +522,7 @@ static inline void initiate( HBKernels_t *const krnl, HBGlobalWorkSizes_t *const
 
 	/* DEBUG: Show GPU generated seeds. */
 	for (size_t i = 0; i < params->bugs_number; ++i) {
-		printf( "%u, ", buf->hst_rng_state[i]);
+		printf( "%u, ", hst_buff->rng_state[i]);
 	}
 	printf( "\n\n" );
 
@@ -516,9 +532,9 @@ static inline void initiate( HBKernels_t *const krnl, HBGlobalWorkSizes_t *const
 
 	printf( "Init maps:\n\tgws = %zu; lws = %zu\n", gws->init_maps[0], lws->init_maps[0] );
 
-	ccl_kernel_set_arg( krnl->init_maps, 0, buf->dev_swarm_map );
-	ccl_kernel_set_arg( krnl->init_maps, 1, buf->dev_heat_map[0] );
-	ccl_kernel_set_arg( krnl->init_maps, 2, buf->dev_heat_map[1] );
+	ccl_kernel_set_arg( krnl->init_maps, 0, dev_buff->swarm_map );
+	ccl_kernel_set_arg( krnl->init_maps, 1, dev_buff->heat_map[0] );
+	ccl_kernel_set_arg( krnl->init_maps, 2, dev_buff->heat_map[1] );
 
 	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->init_maps, oclobj->queue, DIMS_1, NULL, gws->init_maps, lws->init_maps, &ewl, &err_init );
 	ccl_if_err_propagate_goto( err, err_init, error_handler );
@@ -534,7 +550,7 @@ static inline void initiate( HBKernels_t *const krnl, HBGlobalWorkSizes_t *const
 
 	/* Read swarm map, after wait for kernel termination. */
 
-	evt_rdwr = ccl_buffer_enqueue_read( buf->dev_swarm_map, oclobj->queue, NON_BLOCK, 0, bufsz->swarm_map, buf->hst_swarm_map, &ewl, &err_init );
+	evt_rdwr = ccl_buffer_enqueue_read( dev_buff->swarm_map, oclobj->queue, NON_BLOCK, 0, bufsz->swarm_map, hst_buff->swarm_map, &ewl, &err_init );
 	ccl_if_err_propagate_goto( err, err_init, error_handler );
 
 	ccl_event_wait_list_add( &ewl, evt_rdwr, NULL );
@@ -542,12 +558,12 @@ static inline void initiate( HBKernels_t *const krnl, HBGlobalWorkSizes_t *const
 
 	/* Read heat map. */
 
-	evt_rdwr = ccl_buffer_enqueue_read( buf->dev_heat_map[0], oclobj->queue, NON_BLOCK, 0, bufsz->heat_map, buf->hst_heat_map[0], &ewl, &err_init );
+	evt_rdwr = ccl_buffer_enqueue_read( dev_buff->heat_map[0], oclobj->queue, NON_BLOCK, 0, bufsz->heat_map, hst_buff->heat_map[0], &ewl, &err_init );
 	ccl_if_err_propagate_goto( err, err_init, error_handler );
 
 	ccl_event_wait_list_add( &ewl, evt_rdwr, NULL );
 
-	evt_rdwr = ccl_buffer_enqueue_read( buf->dev_heat_map[1], oclobj->queue, NON_BLOCK, 0, bufsz->heat_map, buf->hst_heat_map[1], &ewl, &err_init );
+	evt_rdwr = ccl_buffer_enqueue_read( dev_buff->heat_map[1], oclobj->queue, NON_BLOCK, 0, bufsz->heat_map, hst_buff->heat_map[1], &ewl, &err_init );
 	ccl_if_err_propagate_goto( err, err_init, error_handler );
 
 	ccl_event_wait_list_add( &ewl, evt_rdwr, NULL );
@@ -560,15 +576,15 @@ static inline void initiate( HBKernels_t *const krnl, HBGlobalWorkSizes_t *const
 
 	printf( "\tTesting result from init maps. If no Err pass!\n\n" );
 	for (size_t i = 0; i < params->world_size; ++i) {
-		if (buf->hst_heat_map[0][i] != 0.0f) {
+		if (hst_buff->heat_map[0][i] != 0.0f) {
 			printf( "\t\tErr heatmap buf_0 at pos: %zu\n", i );
 			exit(1);
 		}
-		if (buf->hst_heat_map[1][i] != 0.0f) {
+		if (hst_buff->heat_map[1][i] != 0.0f) {
 			printf( "\t\tErr heatmap buf_1 at pos: %zu\n", i );
 			exit(1);
 		}
-		if (buf->hst_swarm_map[i] != 0) {
+		if (hst_buff->swarm_map[i] != 0) {
 			printf( "\t\tErr swarm_map at pos: %zu\n", i );
 			exit(1);
 		}
@@ -579,11 +595,11 @@ static inline void initiate( HBKernels_t *const krnl, HBGlobalWorkSizes_t *const
 
 	printf( "Init swarm:\n\tgws = %zu; lws = %zu\n", gws->init_swarm[0], lws->init_swarm[0] );
 
-	ccl_kernel_set_arg( krnl->init_swarm, 0, buf->dev_swarm[0] );
-	ccl_kernel_set_arg( krnl->init_swarm, 1, buf->dev_swarm[1] );
-	ccl_kernel_set_arg( krnl->init_swarm, 2, buf->dev_swarm_map );
-	ccl_kernel_set_arg( krnl->init_swarm, 3, buf->dev_unhappiness );
-	ccl_kernel_set_arg( krnl->init_swarm, 4, buf->dev_rng_state );
+	ccl_kernel_set_arg( krnl->init_swarm, 0, dev_buff->swarm[0] );
+	ccl_kernel_set_arg( krnl->init_swarm, 1, dev_buff->swarm[1] );
+	ccl_kernel_set_arg( krnl->init_swarm, 2, dev_buff->swarm_map );
+	ccl_kernel_set_arg( krnl->init_swarm, 3, dev_buff->unhappiness );
+	ccl_kernel_set_arg( krnl->init_swarm, 4, dev_buff->rng_state );
 
 	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->init_swarm, oclobj->queue, DIMS_1, NULL, gws->init_swarm, lws->init_swarm, &ewl, &err_init );
 	ccl_if_err_propagate_goto( err, err_init, error_handler );
@@ -599,26 +615,26 @@ static inline void initiate( HBKernels_t *const krnl, HBGlobalWorkSizes_t *const
 
 	/* Read swarm map, after wait for kernel termination. */
 
-	evt_rdwr = ccl_buffer_enqueue_read( buf->dev_swarm_map, oclobj->queue, NON_BLOCK, 0, bufsz->swarm_map, buf->hst_swarm_map, &ewl, &err_init );
+	evt_rdwr = ccl_buffer_enqueue_read( dev_buff->swarm_map, oclobj->queue, NON_BLOCK, 0, bufsz->swarm_map, hst_buff->swarm_map, &ewl, &err_init );
 	ccl_if_err_propagate_goto( err, err_init, error_handler );
 
 	ccl_event_wait_list_add( &ewl, evt_rdwr, NULL );
 
 	/* Read swarm. */
 
-	evt_rdwr = ccl_buffer_enqueue_read( buf->dev_swarm[0], oclobj->queue, NON_BLOCK, 0, bufsz->swarm, buf->hst_swarm[0], &ewl, &err_init );
+	evt_rdwr = ccl_buffer_enqueue_read( dev_buff->swarm[0], oclobj->queue, NON_BLOCK, 0, bufsz->swarm, hst_buff->swarm[0], &ewl, &err_init );
 	ccl_if_err_propagate_goto( err, err_init, error_handler );
 
 	ccl_event_wait_list_add( &ewl, evt_rdwr, NULL );
 
-	evt_rdwr = ccl_buffer_enqueue_read( buf->dev_swarm[1], oclobj->queue, NON_BLOCK, 0, bufsz->swarm, buf->hst_swarm[1], &ewl, &err_init );
+	evt_rdwr = ccl_buffer_enqueue_read( dev_buff->swarm[1], oclobj->queue, NON_BLOCK, 0, bufsz->swarm, hst_buff->swarm[1], &ewl, &err_init );
 	ccl_if_err_propagate_goto( err, err_init, error_handler );
 
 	ccl_event_wait_list_add( &ewl, evt_rdwr, NULL );
 
 	/* Read unhappiness. */
 
-	evt_rdwr = ccl_buffer_enqueue_read( buf->dev_unhappiness, oclobj->queue, NON_BLOCK, 0, bufsz->unhappiness, buf->hst_unhappiness, &ewl, &err_init );
+	evt_rdwr = ccl_buffer_enqueue_read( dev_buff->unhappiness, oclobj->queue, NON_BLOCK, 0, bufsz->unhappiness, hst_buff->unhappiness, &ewl, &err_init );
 	ccl_if_err_propagate_goto( err, err_init, error_handler );
 
 	ccl_event_wait_list_add( &ewl, evt_rdwr, NULL );
@@ -636,7 +652,7 @@ static inline void initiate( HBKernels_t *const krnl, HBGlobalWorkSizes_t *const
 	{
 		for (size_t j = 0; j < params->world_width; j++ )
 		{
-			printf( "%10u\t", buf->hst_swarm_map[ i * params->world_width + j ] );
+			printf( "%10u\t", hst_buff->swarm_map[ i * params->world_width + j ] );
 		}
 		printf( "\n" );
 	}
@@ -647,9 +663,9 @@ static inline void initiate( HBKernels_t *const krnl, HBGlobalWorkSizes_t *const
 	for ( size_t i = 0; i < params->bugs_number; i++ )
 	{
 		size_t lin, col;
-		lin = buf->hst_swarm[0][i] / params->world_width;
-		col = buf->hst_swarm[0][i] % params->world_width;
-		printf( "bug: %4zu  loc: %4u [%zu, %zu] -> intent: %u  unhapp: %f\n", i, buf->hst_swarm[0][i], lin, col, buf->hst_swarm[1][i], buf->hst_unhappiness[i] );
+		lin = hst_buff->swarm[0][i] / params->world_width;
+		col = hst_buff->swarm[0][i] % params->world_width;
+		printf( "bug: %4zu  loc: %4u [%zu, %zu] -> intent: %u  unhapp: %f\n", i, hst_buff->swarm[0][i], lin, col, hst_buff->swarm[1][i], hst_buff->unhappiness[i] );
 	}
 	printf( "\n" );
 
@@ -665,7 +681,7 @@ error_handler:
  *	Compute the world heat. That is, the two step operation, diffusion
  *	followed by evaporation.
  *	*/
-static inline void comp_world_heat( HBKernels_t *const krnl, HBGlobalWorkSizes_t *const gws, HBLocalWorkSizes_t *const lws, OCLObjects_t *const oclobj, HBBuffers_t *const buf, HBBuffersSize_t *const bufsz, parameters_t *const params,  GError **err )
+static inline void comp_world_heat( HBKernels_t *const krnl, HBGlobalWorkSizes_t *const gws, HBLocalWorkSizes_t *const lws, OCLObjects_t *const oclobj, HBDeviceBuffers_t *const dev_buff, HBHostBuffers_t *const hst_buff, HBBuffersSize_t *const bufsz, parameters_t *const params,  GError **err )
 {
 	GError *err_comp_world_heat = NULL;
 
@@ -680,12 +696,12 @@ static inline void comp_world_heat( HBKernels_t *const krnl, HBGlobalWorkSizes_t
 
 // DEBUG: Only to test diffusion and evaporation: Init a heat map.
 	for ( cl_uint i = 0; i < params->world_size; ++i )
-		buf->hst_heat_map[0][i] = i + 1.0f;
+		hst_buff->heat_map[0][i] = i + 1.0f;
 
 
 
 // DEBUG: Only to test diffusion and evaporation: Send buffer to device.
-	evt_rdwr = ccl_buffer_enqueue_write( buf->dev_heat_map[0], oclobj->queue, NON_BLOCK, 0, bufsz->heat_map, buf->hst_heat_map[0], &ewl, &err_comp_world_heat );
+	evt_rdwr = ccl_buffer_enqueue_write( dev_buff->heat_map[0], oclobj->queue, NON_BLOCK, 0, bufsz->heat_map, hst_buff->heat_map[0], &ewl, &err_comp_world_heat );
 	ccl_if_err_propagate_goto( err, err_comp_world_heat, error_handler );
 
 	ccl_event_wait_list_add( &ewl, evt_rdwr, NULL );
@@ -694,8 +710,8 @@ static inline void comp_world_heat( HBKernels_t *const krnl, HBGlobalWorkSizes_t
 
 	/** Compute world heat. */
 
-	ccl_kernel_set_arg( krnl->comp_world_heat, 0, buf->dev_heat_map[0] );
-	ccl_kernel_set_arg( krnl->comp_world_heat, 1, buf->dev_heat_map[1] );
+	ccl_kernel_set_arg( krnl->comp_world_heat, 0, dev_buff->heat_map[0] );
+	ccl_kernel_set_arg( krnl->comp_world_heat, 1, dev_buff->heat_map[1] );
 
 	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->comp_world_heat, oclobj->queue, DIMS_2, NULL, gws->comp_world_heat, lws->comp_world_heat, &ewl, &err_comp_world_heat );
 	ccl_if_err_propagate_goto( err, err_comp_world_heat, error_handler );
@@ -708,10 +724,10 @@ static inline void comp_world_heat( HBKernels_t *const krnl, HBGlobalWorkSizes_t
 
 
 	/* DEBUG: check world map. */
-	evt_rdwr = ccl_buffer_enqueue_read( buf->dev_heat_map[0], oclobj->queue, NON_BLOCK, 0, bufsz->heat_map, buf->hst_heat_map[0], &ewl, &err_comp_world_heat );
+	evt_rdwr = ccl_buffer_enqueue_read( dev_buff->heat_map[0], oclobj->queue, NON_BLOCK, 0, bufsz->heat_map, hst_buff->heat_map[0], &ewl, &err_comp_world_heat );
 	ccl_if_err_propagate_goto( err, err_comp_world_heat, error_handler );
 
-	evt_rdwr = ccl_buffer_enqueue_read( buf->dev_heat_map[1], oclobj->queue, NON_BLOCK, 0, bufsz->heat_map, buf->hst_heat_map[1], &ewl, &err_comp_world_heat );
+	evt_rdwr = ccl_buffer_enqueue_read( dev_buff->heat_map[1], oclobj->queue, NON_BLOCK, 0, bufsz->heat_map, hst_buff->heat_map[1], &ewl, &err_comp_world_heat );
 	ccl_if_err_propagate_goto( err, err_comp_world_heat, error_handler );
 
 	ccl_event_wait_list_add( &ewl, evt_rdwr, NULL );
@@ -723,7 +739,7 @@ static inline void comp_world_heat( HBKernels_t *const krnl, HBGlobalWorkSizes_t
 	printf( "Computed result for heatmap:\n" );
 	for (cl_uint i = 0; i < params->world_size; ++i) {
 		if (i % params->world_width == 0 ) printf ("-----------------\n");
-		printf( "%f -> %f\n", buf->hst_heat_map[0][i], buf->hst_heat_map[1][i] );
+		printf( "%f -> %f\n", hst_buff->heat_map[0][i], hst_buff->heat_map[1][i] );
 	}
 
 
@@ -751,12 +767,14 @@ int main ( int argc, char *argv[] )
 	/** Kernels. */
 	HBKernels_t krnl = { NULL, NULL, NULL, NULL, NULL, NULL, NULL };
 	/** Global work sizes for all kernels. */
-	HBGlobalWorkSizes_t gws = { {0}, {0}, {0}, {0, 0}, 0, 0, 0 };
+	HBGlobalWorkSizes_t gws = { {0}, {0}, {0}, {0}, {0, 0}, {0}, {0} };
 	/** Local work sizes for all kernels. */
-	HBLocalWorkSizes_t  lws = { {0}, {0}, {0}, {0, 0}, 0, 0, 0 };
+	HBLocalWorkSizes_t  lws = { {0}, {0}, {0}, {0}, {0, 0}, {0}, {0} };
 
-	/** Buffers for host and device. */
-	HBBuffers_t buf = { NULL, { NULL, NULL }, NULL, { NULL, NULL }, NULL, NULL, { NULL, NULL }, NULL, { NULL, NULL }, NULL };
+	/** Buffers for the host. */
+	HBHostBuffers_t hst_buff = { NULL, { NULL, NULL }, NULL, { NULL, NULL }, NULL, NULL };
+	/** Buffers for the device. */
+	HBDeviceBuffers_t dev_buff = { NULL, { NULL, NULL }, NULL, { NULL, NULL }, NULL, NULL };
 	/** Buffers sizes. */
 	HBBuffersSize_t bufsz;
 
@@ -771,7 +789,7 @@ int main ( int argc, char *argv[] )
 	setupHBKernels( &krnl, &gws, &lws, &oclobj, &params, &err );
 	ccl_if_err_goto( err, error_handler );
 
-	setupBuffers( &buf, &bufsz, &oclobj, &params, &err );
+	setupBuffers( &hst_buff, &dev_buff, &bufsz, &oclobj, &params, &err );
 	ccl_if_err_goto( err, error_handler );
 
 
@@ -784,10 +802,10 @@ int main ( int argc, char *argv[] )
 
 
 	/** Run all init kernels. */
-	initiate( &krnl, &gws, &lws, &oclobj, &buf, &bufsz, &params, &err );
+	initiate( &krnl, &gws, &lws, &oclobj, &dev_buff, &hst_buff, &bufsz, &params, &err );
 	ccl_if_err_goto( err, error_handler );
 
-	comp_world_heat( &krnl, &gws, &lws, &oclobj, &buf, &bufsz, &params, &err );
+	comp_world_heat( &krnl, &gws, &lws, &oclobj, &dev_buff, &hst_buff, &bufsz, &params, &err );
 	ccl_if_err_goto( err, error_handler );
 
 
@@ -807,36 +825,38 @@ clean_all:
 	/* Clean / Destroy all allocated items. */
 
 	/* Destroy host buffers. */
-	if (buf.hst_unhappiness) free( buf.hst_unhappiness );
-	if (buf.hst_heat_map[1]) free( buf.hst_heat_map[1] );
-	if (buf.hst_heat_map[0]) free( buf.hst_heat_map[0] );
-	if (buf.hst_swarm_map) free( buf.hst_swarm_map );
-	if (buf.hst_swarm[1]) free( buf.hst_swarm[1] );
-	if (buf.hst_swarm[0]) free( buf.hst_swarm[0] );
-	if (buf.hst_rng_state) free( buf.hst_rng_state );
+	if (hst_buff.unhapp_average)	free( hst_buff.unhapp_average );
+	if (hst_buff.unhappiness)		free( hst_buff.unhappiness );
+	if (hst_buff.heat_map[1])		free( hst_buff.heat_map[1] );
+	if (hst_buff.heat_map[0])		free( hst_buff.heat_map[0] );
+	if (hst_buff.swarm_map)			free( hst_buff.swarm_map );
+	if (hst_buff.swarm[1])			free( hst_buff.swarm[1] );
+	if (hst_buff.swarm[0])			free( hst_buff.swarm[0] );
+	if (hst_buff.rng_state)			free( hst_buff.rng_state );
 
 	/* Destroy Device buffers. */
-	if (buf.dev_unhappiness) ccl_buffer_destroy( buf.dev_unhappiness );
-	if (buf.dev_heat_map[1]) ccl_buffer_destroy( buf.dev_heat_map[1] );
-	if (buf.dev_heat_map[0]) ccl_buffer_destroy( buf.dev_heat_map[0] );
-	if (buf.dev_swarm_map) ccl_buffer_destroy( buf.dev_swarm_map );
-	if (buf.dev_swarm[1]) ccl_buffer_destroy( buf.dev_swarm[1] );
-	if (buf.dev_swarm[0]) ccl_buffer_destroy( buf.dev_swarm[0] );
-	if (buf.dev_rng_state) ccl_buffer_destroy( buf.dev_rng_state );
+	if (dev_buff.unhapp_average)	ccl_buffer_destroy( dev_buff.unhapp_average );
+	if (dev_buff.unhappiness)		ccl_buffer_destroy( dev_buff.unhappiness );
+	if (dev_buff.heat_map[1])		ccl_buffer_destroy( dev_buff.heat_map[1] );
+	if (dev_buff.heat_map[0])		ccl_buffer_destroy( dev_buff.heat_map[0] );
+	if (dev_buff.swarm_map)			ccl_buffer_destroy( dev_buff.swarm_map );
+	if (dev_buff.swarm[1])			ccl_buffer_destroy( dev_buff.swarm[1] );
+	if (dev_buff.swarm[0])			ccl_buffer_destroy( dev_buff.swarm[0] );
+	if (dev_buff.rng_state)			ccl_buffer_destroy( dev_buff.rng_state );
 
 	/** Destroy kernel wrappers. */
 //	if (krnl.test) ccl_kernel_destroy( krnl.test );
 //	if (krnl.unhappiness) ccl_kernel_destroy( krnl.unhappiness );
 //	if (krnl.bug_step) ccl_kernel_destroy( krnl.bug_step );
-	if (krnl.comp_world_heat) ccl_kernel_destroy( krnl.comp_world_heat );
-	if (krnl.init_swarm) ccl_kernel_destroy( krnl.init_swarm );
-	if (krnl.init_maps) ccl_kernel_destroy( krnl.init_maps );
-	if (krnl.init_random) ccl_kernel_destroy( krnl.init_random );
+	if (krnl.comp_world_heat)	ccl_kernel_destroy( krnl.comp_world_heat );
+	if (krnl.init_swarm)		ccl_kernel_destroy( krnl.init_swarm );
+	if (krnl.init_maps)			ccl_kernel_destroy( krnl.init_maps );
+	if (krnl.init_random)		ccl_kernel_destroy( krnl.init_random );
 
 	/** Free remaining OpenCL wrappers. */
-	if (oclobj.prg) ccl_program_destroy( oclobj.prg );
-	if (oclobj.queue) ccl_queue_destroy( oclobj.queue );
-	if (oclobj.ctx) ccl_context_destroy( oclobj.ctx );
+	if (oclobj.prg)		ccl_program_destroy( oclobj.prg );
+	if (oclobj.queue)	ccl_queue_destroy( oclobj.queue );
+	if (oclobj.ctx)		ccl_context_destroy( oclobj.ctx );
 
 	/** Close output file. */
 	if (hbResult) fclose( hbResult );
