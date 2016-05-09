@@ -655,7 +655,7 @@ __kernel void comp_world_heat( __global float *heat_map, __global float *heat_bu
 /*
  *
  */
-__kernel void mean_unhappiness_step1( __global float *unhappiness, __local float *partial_sum, __global float *reduce_result )
+__kernel void unhappiness_step1_reduce( __global float *unhappiness, __local float *partial_sum )
 {
 	const uint glb_bug_id = get_global_id( 0 );
 	const uint lcl_bug_id = get_local_id( 0 );
@@ -713,9 +713,9 @@ __kernel void mean_unhappiness_step1( __global float *unhappiness, __local float
 		barrier( CLK_LOCAL_MEM_FENCE );
 	}
 
-	/* Put in global memory */
+	/* Put in back in global memory and reuse the unhappiness vector. */
 	if (lcl_bug_id == 0) {
-		reduce_result[ get_group_id(0) ] = partial_sums[0];
+		unhappiness[ get_group_id(0) ] = partial_sums[0];
 	}
 
 	return;
@@ -723,17 +723,20 @@ __kernel void mean_unhappiness_step1( __global float *unhappiness, __local float
 
 
 
+__kernel void unhappiness_step2_mean( __global float *unhappiness, __local float *partial_sum, __global float *mean )
+{
+	const uint glb_bug_id = get_global_id( 0 );
+	const uint lcl_bug_id = get_local_id( 0 );
+
+
+}
+
+
 
 
 /**
- * @brief Grass reduction kernel, part 2.
- *
- * @param reduce_grass_global Global level grass counts.
- * @param partial_sums Workgroup level (shared memory) grass counts.
- * @param stats Final grass count.
  * */
- __kernel void reduce_grass2(
-			__global grassreduce_uintx *reduce_grass_global,
+ __kernel void reduce_grass2( __global grassreduce_uintx *reduce_grass_global,
 			__local grassreduce_uintx *partial_sums,
 			__global PPStatisticsOcl *stats) {
 
