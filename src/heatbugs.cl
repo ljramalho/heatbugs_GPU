@@ -723,7 +723,7 @@ __kernel void unhappiness_step1_reduce( __global float *unhappiness, __local flo
 
 
 
-__kernel void unhappiness_step2_mean( __global float *unhappiness, __local float *partial_sums, __global float *mean )
+__kernel void unhappiness_step2_average( __global float *unhappiness, __local float *partial_sums, __global float *mean )
 {
 	__private uint iter;
 

@@ -28,13 +28,13 @@
 #define CL_KERNEL_SRC_FILE "./heatbugs.cl"
 
 /* The main kernel function names. */
-#define KERNEL_NAME__INIT_RANDOM			"init_random"
-#define KERNEL_NAME__INIT_MAPS				"init_maps"
-#define KERNEL_NAME__INIT_SWARM				"init_swarm"
-#define KERNEL_NAME__BUG_STEP				"bug_step"
-#define KERNEL_NAME__COMP_WORLD_HEAT		"comp_world_heat"
-#define KERNEL_NAME__UNHAPPINESS_S1_REDUCE	"unhappiness_step1_reduce"
-#define KERNEL_NAME__UNHAPPINESS_S2_MEAN	"unhappiness_step2_mean"
+#define KERNEL_NAME__INIT_RANDOM				"init_random"
+#define KERNEL_NAME__INIT_MAPS					"init_maps"
+#define KERNEL_NAME__INIT_SWARM					"init_swarm"
+#define KERNEL_NAME__BUG_STEP					"bug_step"
+#define KERNEL_NAME__COMP_WORLD_HEAT			"comp_world_heat"
+#define KERNEL_NAME__UNHAPPINESS_S1_REDUCE		"unhappiness_step1_reduce"
+#define KERNEL_NAME__UNHAPPINESS_S2_AVERAGE		"unhappiness_step2_average"
 
 
 
