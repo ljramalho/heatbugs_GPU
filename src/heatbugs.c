@@ -15,13 +15,19 @@
  * along with heatbugs_GPU. If not, see <http://www.gnu.org/licenses/>.
  * */
 
+#define _GNU_SOURCE			/* this allow 'getopt(..)' function in <unistd.h> to compile under -std=c99 compiler option, because 'getopt' is POSIX, not c99. */
+
+
 #include <stdio.h>			/* printf(...)	*/
 #include <stdlib.h>			/* exit(...)	*/
+#include <unistd.h>
+//#include <ctype.h>
 #include <string.h>
 
 #include <cf4ocl2.h>		/* glib.h included by cf4ocl2.h to handle GError*, MIN(...), g_random_int(). */
 
 #include "heatbugs.h"
+
 
 
 /* The cl kernel file pathname. */
@@ -193,23 +199,63 @@ static GQuark hb_error_quark( void ) {
 
 
 
-
-static void setupParameters( parameters_t *const params, GError **err )
+/**
+ * Sets the parameters passed as command line arguments.
+ * If there are no parameters, default parameters are used.
+ * Default parameter will be used for every omitted parameter.
+ *
+ * This function uses the GNU 'getopt' command line argument parser, and requires
+ * the macro __GNU_SOURCE to be defined. As such, the code using the 'getopt'
+ * function is not portable.
+ * Consequence of using 'getopt' is that the previous result of 'argv' parameter
+ * may change after 'getopt' is used, therefore 'argv' should not be used again.
+ * The function 'getopt' is marked as Thread Unsafe.
+ * */
+static void setupParameters( parameters_t *const params, int argc, char *argv[], GError **err )
 {
-	 /* TODO: Get simulation parameters. This ones are defaults. */
-	params->bugs_temperature_min_ideal = 20;	/* 10 */
-	params->bugs_temperature_max_ideal = 30;	/* 40 */
-	params->bugs_heat_min_output = 15;			/*  5 */
-	params->bugs_heat_max_output = 25;			/* 25 */
-	params->bugs_random_move_chance = 0.0;		/*  0%  Valid:[0 .. 100] */
+	int c;										/* Parsed command line option */
 
-	params->world_diffusion_rate = 0.9;			/* 90%  */
-	params->world_evaporation_rate = 0.01;		/*  1%  */
-	params->world_width =  5;					/* 100	*/
-	params->world_height = 5;					/* 100	*/
 
-	params->bugs_number = 20;					/* 100 Bugs in the world. */
-	params->numIterations =  1000;				/* 0 = NonStop. */
+	 /* Default / hardcoded parameters. */
+	params->bugs_temperature_min_ideal = 20;	/* t =   10  */
+	params->bugs_temperature_max_ideal = 30;	/* T =   40  */
+	params->bugs_heat_min_output = 15;			/* h =    5  */
+	params->bugs_heat_max_output = 25;			/* H =   25  */
+	params->bugs_random_move_chance = 0.0;		/* r =    0%  Valid:[0 .. 100] */
+
+	params->world_diffusion_rate = 0.9;			/* d =   90% */
+	params->world_evaporation_rate = 0.01;		/* e =    1% */
+	params->world_width =  5;					/* w =  100	 */
+	params->world_height = 5;					/* W =  100	 */
+
+	params->bugs_number = 20;					/* n =  100 Bugs in the world. */
+	params->numIterations =  1000;				/* i = 1000 (0 = NonStop). */
+
+	/*
+		Parse command line arguments using GNU's getopt function.
+		The string 't:T:h:H:r:n:d:e:w:W:i:f:' is the parameter string to be checked.
+		The ':' sign means that a value is required after the parameter selector
+		character (i.e. -t 50  or  -t50).
+	*/
+	while ( (c = getopt( argc, argv, "t:T:h:H:r:n:d:e:w:W:i:f:")) != -1 )
+	{
+		switch (c)
+		{
+			case t:
+			case T:
+			case h:
+			case H:
+			case r:
+			case n:
+			case d:
+			case e:
+			case w:
+			case W:
+			case i:
+			case f:
+		}
+	}
+
 
 
 	params->world_size = params->world_height * params->world_width;
@@ -780,7 +826,7 @@ int main ( int argc, char *argv[] )
 
 
 
-	setupParameters( &params, &err );
+	setupParameters( &params, argc, argv, &err );
 	ccl_if_err_goto( err, error_handler );
 
 	setupOCLObjects( &oclobj, &params, &err );

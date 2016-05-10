@@ -70,6 +70,7 @@ typedef struct parameters {
 	size_t world_height;
 	size_t world_size;					/* It is (world_height * world_width).    */
 	size_t numIterations;				/* Iterations to stop. (0 = no stop).     */
+	char output_filename[256];			/* The file to send results. */
 } parameters_t;
 
 
