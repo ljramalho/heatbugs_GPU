@@ -21,8 +21,8 @@
 #include <stdio.h>			/* printf(...)	*/
 #include <stdlib.h>			/* exit(...)	*/
 #include <unistd.h>
-//#include <ctype.h>
 #include <string.h>
+#include <ctype.h>			/* isprint(..)	*/
 
 #include <cf4ocl2.h>		/* glib.h included by cf4ocl2.h to handle GError*, MIN(...), g_random_int(). */
 
@@ -215,6 +215,15 @@ static void setupParameters( parameters_t *const params, int argc, char *argv[],
 {
 	int c;										/* Parsed command line option */
 
+	/*
+		The string 't:T:h:H:r:n:d:e:w:W:i:f:' is the parameter string to be
+		checked by 'getopt' function.
+		The ':' sign means that a value is required after the parameter selector
+		character (i.e. -t 50  or  -t50).
+	*/
+	const char matches[] = "t:T:h:H:r:n:d:e:w:W:i:f:";
+
+
 
 	 /* Default / hardcoded parameters. */
 	params->bugs_temperature_min_ideal = 20;	/* t =   10  */
@@ -231,40 +240,79 @@ static void setupParameters( parameters_t *const params, int argc, char *argv[],
 	params->bugs_number = 20;					/* n =  100 Bugs in the world. */
 	params->numIterations =  1000;				/* i = 1000 (0 = NonStop). */
 
-	/*
-		Parse command line arguments using GNU's getopt function.
-		The string 't:T:h:H:r:n:d:e:w:W:i:f:' is the parameter string to be checked.
-		The ':' sign means that a value is required after the parameter selector
-		character (i.e. -t 50  or  -t50).
-	*/
-	while ( (c = getopt( argc, argv, "t:T:h:H:r:n:d:e:w:W:i:f:")) != -1 )
+	strcpy( params->output_filename, "../results/heatbugsC_00.csv" );
+
+
+	/* Parse command line arguments using GNU's getopt function. */
+
+	while ( (c = getopt( argc, argv, matches )) != -1 )
 	{
 		switch (c)
 		{
-			case t:
-			case T:
-			case h:
-			case H:
-			case r:
-			case n:
-			case d:
-			case e:
-			case w:
-			case W:
-			case i:
-			case f:
+			case 't':
+				params->bugs_temperature_min_ideal = atoi( optarg );
+				break;
+			case 'T':
+				params->bugs_temperature_max_ideal = atoi( optarg );
+				break;
+			case 'h':
+				params->bugs_heat_min_output = atoi( optarg );
+				break;
+			case 'H':
+				params->bugs_heat_max_output = atoi( optarg );
+				break;
+			case 'r':
+				params->bugs_random_move_chance = atof( optarg );
+				break;
+			case 'n':
+				params->bugs_number = atoi( optarg );
+				break;
+			case 'd':
+				params->world_diffusion_rate = atof( optarg );
+				break;
+			case 'e':
+				params->world_evaporation_rate = atof( optarg );
+				break;
+			case 'w':
+				params->world_width = atoi( optarg );
+				break;
+			case 'W':
+				params->world_height = atoi( optarg );
+				break;
+			case 'i':
+				params->numIterations = atoi( optarg );
+				break;
+			case 'f':
+				strcpy( params->output_filename, optarg );
+				break;
+			case '?':
+				ccl_if_err_create_goto( *err, HB_ERROR, (optopt != ':' && strchr( matches, optopt ) != NULL), HB_PARAM_ARG_MISSING, error_handler, "Option set but required argument missing." );
+				ccl_if_err_create_goto( *err, HB_ERROR, (isprint( optopt )), HB_PARAM_OPTION_UNKNOWN, error_handler, "Unknown option." );
+				ccl_if_err_create_goto( *err, HB_ERROR, CL_TRUE, HB_PARAM_CHAR_UNKNOWN, error_handler, "Unprintable character in command line." );
+			default:
+				ccl_if_err_create_goto( *err, HB_ERROR, CL_TRUE, HB_PARAM_PARSING, error_handler, "Weird error occurred while parsing parameter." );
 		}
 	}
 
+	/* TODO: Check here for extra arguments... see: https://www.gnu.org/software/libc/manual/html_node/Example-of-Getopt.html */
 
 
 	params->world_size = params->world_height * params->world_width;
 
-
+	/* Check for bug's number realted errors. */
 	ccl_if_err_create_goto( *err, HB_ERROR, params->bugs_number == 0, HB_BUGS_ZERO, error_handler, "There are no bugs." );
-
 	ccl_if_err_create_goto( *err, HB_ERROR, params->bugs_number >= params->world_size, HB_BUGS_OVERFLOW, error_handler, "Number of bugs exceed available world slots." );
 
+	/* Check for range related erros in bugs'd ideal temperature. Checking order matters! */
+	ccl_if_err_create_goto( *err, HB_ERROR, params->bugs_temperature_min_ideal > params->bugs_temperature_max_ideal, HB_TEMPERATURE_OVERLAP, error_handler, "Bug's ideal temperature range overlaps.");
+	ccl_if_err_create_goto( *err, HB_ERROR, params->bugs_temperature_max_ideal >= 200, HB_TEMPERATURE_OUT_RANGE, error_handler, "Bug's max ideal temperature is out of range." );
+
+	/* Check for range related error in bug's output heat. Checking order matters! */
+	ccl_if_err_create_goto( *err, HB_ERROR, params->bugs_heat_min_output > params->bugs_heat_max_output, HB_OUTPUT_HEAT_OVERLAP, error_handler, "Bug's output heat range overlaps.");
+	ccl_if_err_create_goto( *err, HB_ERROR, params->bugs_heat_max_output >= 100, HB_OUTPUT_HEAT_OUT_RANGE, error_handler, "Bug's max output heat is out of range." );
+
+
+	/* If numeber of bugs is 80% of the world space issue a warning. */
 	if (params->bugs_number >= 0.8 * params->world_size)
 		fprintf( stderr, "Warning: Bugs number close to available world slots.\n" );
 
@@ -274,6 +322,7 @@ error_handler:
 
 	return;
 }
+
 
 
 static void setupOCLObjects( OCLObjects_t *const oclobj, const parameters_t *const params, GError **err )
@@ -346,6 +395,7 @@ error_handler:
 
 	return;
 }
+
 
 
 /**
@@ -427,6 +477,7 @@ error_handler:
 
 	return;
 }
+
 
 
 static void setupBuffers( HBHostBuffers_t *const hst_buff, HBDeviceBuffers_t *const dev_buff, HBBuffersSize_t *const bufsz, const OCLObjects_t *const oclobj, const parameters_t *const params, GError **err )
@@ -524,6 +575,7 @@ error_handler:
 
 	return;
 }
+
 
 
 /**
@@ -841,7 +893,7 @@ int main ( int argc, char *argv[] )
 
 
 	/* Open output file for results. */
-	hbResult = fopen( "../results/heatbugsC_00.csv", "w+" );	/* Open file overwrite. */
+	hbResult = fopen( params.output_filename, "w+" );	/* Open file overwrite. */
 
 	if (hbResult == NULL)
 		ERROR_MSG_AND_EXIT( "Error: Could not open output file." );
