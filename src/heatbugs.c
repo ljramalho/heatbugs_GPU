@@ -79,7 +79,7 @@ typedef struct ocl_objects {
 /** Holder for all HeatBugs kernels. */
 typedef struct hb_kernels {
 	CCLKernel *init_random;				/* kernel: Initiate random seeds. */
-	CCLKernel *init_maps;				/* kernel: Initiate heat map. */
+	CCLKernel *init_maps;				/* kernel: Initiate heat_map and swarm_map. */
 	CCLKernel *init_swarm;				/* kernel: Initiate the world of bugs. */
 	CCLKernel *bug_step;				/* kernel: Perform a new bug movement. */
 	CCLKernel *comp_world_heat;			/* kernel: Compute world heat, diffusion then evaporation. */
@@ -210,6 +210,11 @@ static GQuark hb_error_quark( void ) {
  * Consequence of using 'getopt' is that the previous result of 'argv' parameter
  * may change after 'getopt' is used, therefore 'argv' should not be used again.
  * The function 'getopt' is marked as Thread Unsafe.
+ *
+ * @param[out]	params		Parameters to be filled with default or from command line.
+ * @param[in]	argc		Command line argument counter.
+ * @param[in]	argv		Command line arguments.
+ * @param[out]	err			GLib error object for error reporting.
  * */
 static void setupParameters( parameters_t *const params, int argc, char *argv[], GError **err )
 {
@@ -294,7 +299,7 @@ static void setupParameters( parameters_t *const params, int argc, char *argv[],
 		}
 	}
 
-	/* TODO: Check here for extra arguments... see: https://www.gnu.org/software/libc/manual/html_node/Example-of-Getopt.html */
+	/* NOTE: Check here for extra arguments... see: https://www.gnu.org/software/libc/manual/html_node/Example-of-Getopt.html */
 
 
 	params->world_size = params->world_height * params->world_width;
@@ -325,6 +330,16 @@ error_handler:
 
 
 
+/**
+ * Get and / or create all OpenCL objects.
+ *	- Create a Context, get the device (GPU) from the context.
+ *	- Create a command queue.
+ *	- Create and build a program for devices in the context (GPU).
+ *
+ * @param[out]	oclobj		A structure holding the pointers for each OpenCL object.
+ * @param[in]	params		The simulation parameters. Used to create the program's compiler options.
+ * @param[out]	err			GLib error object for error reporting.
+ * */
 static void setupOCLObjects( OCLObjects_t *const oclobj, const parameters_t *const params, GError **err )
 {
 	FILE *uranddev = NULL;
@@ -399,87 +414,15 @@ error_handler:
 
 
 /**
- * Create the kernel objects, one for each kernel function.
+ * Create all the buffers for both, host and device.
+ *
+ * @param[out]	hst_buff	The structure with all host buffers to be filled.
+ * @param[out]	dev_buff	The structure with all cf4ocl2 wrapper for device buffers to be filled.
+ * @param[out]	bufsz		The structure with all the buffer sizes to be computed from 'params'. Sizes are common to host and device buffers.
+ * @param[in]	oclObj		The structure to the previously created OpenCl objects. From this we need the 'context' in which to create the buffers.
+ * @param[in]	params		The structure with all simulation parameters. Used to compute buffer sizes.
+ * @param[out]	err			GLib error object for error reporting.
  * */
-static void setupHBKernels( HBKernels_t *const krnl, HBGlobalWorkSizes_t *const gws, HBLocalWorkSizes_t *const lws, const OCLObjects_t *const oclobj, const parameters_t *const params, GError **err )
-{
-	GError *err_setup = NULL;
-	size_t world_realdims[2] = {params->world_width, params->world_height};
-
-
-	/** RANDOM INITIALIZATION Kernel. A random per bug. */
-
-	krnl->init_random = ccl_kernel_new( oclobj->prg, KERNEL_NAME__INIT_RANDOM, &err_setup );
-	ccl_if_err_propagate_goto( err, err_setup, error_handler );
-
-	ccl_kernel_suggest_worksizes( krnl->init_random, oclobj->dev, DIMS_1, &params->bugs_number, gws->init_random, lws->init_random, &err_setup );
-	ccl_if_err_propagate_goto( err, err_setup, error_handler );
-
-	printf( "[ kernel ]: init_random.\n    '-> bugs_num = %zu; gws = %zu; lws = %zu\n", params->bugs_number, gws->init_random[0], lws->init_random[0] );
-
-
-	/** SWARM_MAP and HEAT_MAP INITIALIZATION Kernel. */
-
-	krnl->init_maps = ccl_kernel_new( oclobj->prg, KERNEL_NAME__INIT_MAPS, &err_setup );
-	ccl_if_err_propagate_goto( err, err_setup, error_handler );
-
-	ccl_kernel_suggest_worksizes( krnl->init_maps, oclobj->dev, DIMS_1, &params->world_size, gws->init_maps, lws->init_maps, &err_setup );
-	ccl_if_err_propagate_goto( err, err_setup, error_handler );
-
-	printf( "[ kernel ]: init_maps.\n    '-> world_size = %zu; gws = %zu; lws = %zu\n", params->world_size, gws->init_maps[0], lws->init_maps[0] );
-
-
-	/** SWARM INITIALIZATION. To put bugs in the world and Reset unhappiness vector. */
-
-	krnl->init_swarm = ccl_kernel_new( oclobj->prg, KERNEL_NAME__INIT_SWARM, &err_setup );
-	ccl_if_err_propagate_goto( err, err_setup, error_handler );
-
-	/* Dimensions are relactive to the number of bugs to be dropped in swarm map. */
-	ccl_kernel_suggest_worksizes( krnl->init_swarm, oclobj->dev, DIMS_1, &params->bugs_number, gws->init_swarm, lws->init_swarm, &err_setup );
-	ccl_if_err_propagate_goto( err, err_setup, error_handler );
-
-	printf( "[ kernel ]: init_swarm.\n    '-> bugs_num = %zu; gws = %zu; lws = %zu\n", params->bugs_number, gws->init_swarm[0], lws->init_swarm[0] );
-
-
-	/** WORLD HEAT Computation. Compute world diffusion followed by world evapotation. */
-
-	krnl->comp_world_heat = ccl_kernel_new( oclobj->prg, KERNEL_NAME__COMP_WORLD_HEAT, &err_setup );
-	ccl_if_err_propagate_goto( err, err_setup, error_handler );
-
-	ccl_kernel_suggest_worksizes( krnl->comp_world_heat, oclobj->dev, DIMS_2, world_realdims, gws->comp_world_heat, lws->comp_world_heat, &err_setup );
-	ccl_if_err_propagate_goto( err, err_setup, error_handler );
-
-	printf( "[ kernel ]: comp_world_heat.\n    '-> world_dims = [%zu, %zu]; gws = [%zu, %zu]; lws = [%zu, %zu]\n", world_realdims[0], world_realdims[1], gws->comp_world_heat[0], gws->comp_world_heat[1], lws->comp_world_heat[0], lws->comp_world_heat[1] );
-
-
-	/** Kernel for bug step. */
-
-//	krnl->bug_step = ccl_kernel_new( oclobj->prg, KERNEL_NAME__BUG_STEP, &err_setup );
-//	ccl_if_err_propagate_goto( err, err_setup, error_handler );
-
-//	krnl->unhappiness = ccl_kernel_new( oclobj->prg, KERNEL_NAME__UNHAPPINESS, &err_setup );
-//	ccl_if_err_propagate_goto( err, err_setup, error_handler );
-
-//	krnl->test = ccl_kernel_new( oclobj->prg, KERNEL_NAME__TEST, &err_setup );
-//	ccl_if_err_propagate_goto( err, err_setup, error_handler );
-
-
-
-	/* TODO: Calculate global work sizes and local work sizes. */
-
-	//printf("rws={%ld}, gws={%ld}, lws={%ld}\n\n", params->world_size, gws->init, lws->init);
-
-	printf( "\n" );
-
-
-error_handler:
-		/* If error handler is reached leave function imediately. */
-
-	return;
-}
-
-
-
 static void setupBuffers( HBHostBuffers_t *const hst_buff, HBDeviceBuffers_t *const dev_buff, HBBuffersSize_t *const bufsz, const OCLObjects_t *const oclobj, const parameters_t *const params, GError **err )
 {
 	GError *err_setbuf = NULL;
@@ -559,7 +502,7 @@ static void setupBuffers( HBHostBuffers_t *const hst_buff, HBDeviceBuffers_t *co
 	ccl_if_err_propagate_goto( err, err_setbuf, error_handler );
 
 
-	/** UNHAPPINESS AVERAGE */
+	/** UNHAPPINESS AVERAGE - To get the result. */
 
 	bufsz->unhapp_average = sizeof( cl_float );
 
@@ -572,6 +515,152 @@ static void setupBuffers( HBHostBuffers_t *const hst_buff, HBDeviceBuffers_t *co
 
 error_handler:
 	/* If error handler is reached leave function imediately. */
+
+	return;
+}
+
+
+
+/**
+ * Get the kernel objects from the program. One for each kernel function.
+ *
+ * @param[out]	krnl
+ * @param[out]	gws
+ * @param[out]	lws
+ * @param[in]	oclobj
+ * @param[in]	params
+ * @param[out]	err			GLib error object for error reporting.
+ * */
+static void getKernels( HBKernels_t *const krnl, HBGlobalWorkSizes_t *const gws, HBLocalWorkSizes_t *const lws, const OCLObjects_t *const oclobj, const parameters_t *const params, GError **err )
+{
+	GError *err_setup = NULL;
+	size_t world_realdims[2] = {params->world_width, params->world_height};
+
+
+	/** RANDOM INITIALIZATION Kernel. A random per bug. */
+
+	krnl->init_random = ccl_kernel_new( oclobj->prg, KERNEL_NAME__INIT_RANDOM, &err_setup );
+	ccl_if_err_propagate_goto( err, err_setup, error_handler );
+
+	ccl_kernel_suggest_worksizes( krnl->init_random, oclobj->dev, DIMS_1, &params->bugs_number, gws->init_random, lws->init_random, &err_setup );
+	ccl_if_err_propagate_goto( err, err_setup, error_handler );
+
+	printf( "[ kernel ]: init_random.\n    '-> bugs_num = %zu; gws = %zu; lws = %zu\n", params->bugs_number, gws->init_random[0], lws->init_random[0] );
+
+
+	/** INIT_MAPS: SWARM_MAP and HEAT_MAP INITIALIZATION Kernel. */
+
+	krnl->init_maps = ccl_kernel_new( oclobj->prg, KERNEL_NAME__INIT_MAPS, &err_setup );
+	ccl_if_err_propagate_goto( err, err_setup, error_handler );
+
+	ccl_kernel_suggest_worksizes( krnl->init_maps, oclobj->dev, DIMS_1, &params->world_size, gws->init_maps, lws->init_maps, &err_setup );
+	ccl_if_err_propagate_goto( err, err_setup, error_handler );
+
+	printf( "[ kernel ]: init_maps.\n    '-> world_size = %zu; gws = %zu; lws = %zu\n", params->world_size, gws->init_maps[0], lws->init_maps[0] );
+
+
+	/** SWARM INITIALIZATION. To put bugs in the world and Reset unhappiness vector. */
+
+	krnl->init_swarm = ccl_kernel_new( oclobj->prg, KERNEL_NAME__INIT_SWARM, &err_setup );
+	ccl_if_err_propagate_goto( err, err_setup, error_handler );
+
+	/* Dimensions are relactive to the number of bugs to be dropped in swarm map. */
+	ccl_kernel_suggest_worksizes( krnl->init_swarm, oclobj->dev, DIMS_1, &params->bugs_number, gws->init_swarm, lws->init_swarm, &err_setup );
+	ccl_if_err_propagate_goto( err, err_setup, error_handler );
+
+	printf( "[ kernel ]: init_swarm.\n    '-> bugs_num = %zu; gws = %zu; lws = %zu\n", params->bugs_number, gws->init_swarm[0], lws->init_swarm[0] );
+
+
+	/** BUG STEP. Compute a feasible movement for each bug. */
+
+	krnl->bug_step = ccl_kernel_new( oclobj->prg, KERNEL_NAME__BUG_STEP, &err_setup );
+	ccl_if_err_propagate_goto( err, err_setup, error_handler );
+
+	ccl_kernel_suggest_worksizes( krnl->bug_step, oclobj->dev, DIMS_1, &params->world_size, gws->bug_step, lws->bug_step, &err_setup );
+	ccl_if_err_propagate_goto( err, err_setup, error_handler );
+
+	printf( "[ kernel ]: bug_step.\n    '-> world_size = %zu; gws = %zu; lws = %zu\n", params->world_size, gws->bug_step[0], lws->bug_step[0] );
+
+
+	/** WORLD HEAT Computation. Compute world diffusion followed by world evapotation. */
+
+	krnl->comp_world_heat = ccl_kernel_new( oclobj->prg, KERNEL_NAME__COMP_WORLD_HEAT, &err_setup );
+	ccl_if_err_propagate_goto( err, err_setup, error_handler );
+
+	ccl_kernel_suggest_worksizes( krnl->comp_world_heat, oclobj->dev, DIMS_2, world_realdims, gws->comp_world_heat, lws->comp_world_heat, &err_setup );
+	ccl_if_err_propagate_goto( err, err_setup, error_handler );
+
+	printf( "[ kernel ]: comp_world_heat.\n    '-> world_dims = [%zu, %zu]; gws = [%zu, %zu]; lws = [%zu, %zu]\n", world_realdims[0], world_realdims[1], gws->comp_world_heat[0], gws->comp_world_heat[1], lws->comp_world_heat[0], lws->comp_world_heat[1] );
+
+
+	/** UNHAPPINESS STEP 1 - REDUCE: First step to compute the bug's unhapines average. */
+
+	krnl->unhapp_stp1_reduce = ccl_kernel_new( oclobj->prg, KERNEL_NAME__UNHAPPINESS_S1_REDUCE, &err_setup );
+	ccl_if_err_propagate_goto( err, err_setup, error_handler );
+
+	ccl_kernel_suggest_worksizes( krnl->unhapp_stp1_reduce, oclobj->dev, DIMS_1, &params->bugs_number, gws->unhapp_stp1_reduce, lws->unhapp_stp1_reduce, &err_setup );
+	ccl_if_err_propagate_goto( err, err_setup, error_handler );
+
+
+	/** UNHAPPINESS STEP 2 - AVERAGE: Compute the final reduction followed by the unhappiness average. */
+
+	krnl->unhapp_stp2_average = ccl_kernel_new( oclobj->prg, KERNEL_NAME__UNHAPPINESS_S2_AVERAGE, &err_setup );
+	ccl_if_err_propahete_goto( err, err_setup, error_handler );
+
+	ccl_kernel_suggest_worksizes( krnl->unhapp_stp2_average, oclobj->dev, DIMS_1,  );
+	ccl_if_err_propagate_goto( err, err_setup, error_handler );
+
+
+	printf( "\n" );
+
+
+error_handler:
+		/* If error handler is reached leave function imediately. */
+
+	return;
+}
+
+
+
+/**
+ * */
+void setKernelParameters( HBKernels_t *const krnl, HBDeviceBuffers_t *const dev_buff )
+{
+	/* 'init_random' kernel arguments. */
+	ccl_kernel_set_arg( krnl->init_random, 0, dev_buff->rng_state );	/* Random numbers. One per bug. */
+
+	/* 'init_maps' kernel arguments. 'heat_map[0]' and 'heat_map[1]' change their places at each step. */
+	ccl_kernel_set_arg( krnl->init_maps, 0, dev_buff->swarm_map );		/* World, bug's containner. */
+	ccl_kernel_set_arg( krnl->init_maps, 1, dev_buff->heat_map[0] );	/* Heat map showing current temperature. */
+	ccl_kernel_set_arg( krnl->init_maps, 2, dev_buff->heat_map[1] );	/* Heat map buffer, to compute new temperature. */
+
+	/* 'init_swarm' kernel arguments. 'swarm[0]' and 'swarm[1]' change their places at each step. */
+	ccl_kernel_set_arg( krnl->init_swarm, 0, dev_buff->swarm[0] );		/* Swarm 1: the bug position in the 'swarm_map'. */
+	ccl_kernel_set_arg( krnl->init_swarm, 1, dev_buff->swarm[1] );		/* Swarm 2: place where the bug want to go. */
+	ccl_kernel_set_arg( krnl->init_swarm, 2, dev_buff->swarm_map );
+	ccl_kernel_set_arg( krnl->init_swarm, 3, dev_buff->unhappiness );
+	ccl_kernel_set_arg( krnl->init_swarm, 4, dev_buff->rng_state );
+
+	/* 'bug_step' kernel arguments. */
+	ccl_kernel_set_arg();
+	ccl_kernel_set_arg();
+	ccl_kernel_set_arg();
+	ccl_kernel_set_arg();
+	ccl_kernel_set_arg();
+	ccl_kernel_set_arg();
+
+	/* 'comp_world_heat' kernel arguments. */
+	ccl_kernel_set_arg();
+	ccl_kernel_set_arg();
+
+	/* 'unhappiness_step1_reduce' kernel arguments. */
+	ccl_kernel_set_arg();
+	ccl_kernel_set_arg();
+
+	/* 'unhappiness_step2_average' kernel arguments. */
+	ccl_kernel_set_arg();
+	ccl_kernel_set_arg();
+	ccl_kernel_set_arg();
 
 	return;
 }
@@ -594,8 +683,6 @@ static inline void initiate( HBKernels_t *const krnl, HBGlobalWorkSizes_t *const
 	/** INIT RANDOM. */
 
 	printf( "Init random:\n\tgws = %zu; lws = %zu\n", gws->init_random[0], lws->init_random[0] );
-
-	ccl_kernel_set_arg( krnl->init_random, 0, dev_buff->rng_state );
 
 	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->init_random, oclobj->queue, DIMS_1, NULL, gws->init_random, lws->init_random, &ewl, &err_init );
 	ccl_if_err_propagate_goto( err, err_init, error_handler );
@@ -629,10 +716,6 @@ static inline void initiate( HBKernels_t *const krnl, HBGlobalWorkSizes_t *const
 	/** RESET SWARM_MAP and HEAT_MAP. */
 
 	printf( "Init maps:\n\tgws = %zu; lws = %zu\n", gws->init_maps[0], lws->init_maps[0] );
-
-	ccl_kernel_set_arg( krnl->init_maps, 0, dev_buff->swarm_map );
-	ccl_kernel_set_arg( krnl->init_maps, 1, dev_buff->heat_map[0] );
-	ccl_kernel_set_arg( krnl->init_maps, 2, dev_buff->heat_map[1] );
 
 	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->init_maps, oclobj->queue, DIMS_1, NULL, gws->init_maps, lws->init_maps, &ewl, &err_init );
 	ccl_if_err_propagate_goto( err, err_init, error_handler );
@@ -692,12 +775,6 @@ static inline void initiate( HBKernels_t *const krnl, HBGlobalWorkSizes_t *const
 	/* INIT SWARM Fill the swarm map with bugs, compute unhapinnes. */
 
 	printf( "Init swarm:\n\tgws = %zu; lws = %zu\n", gws->init_swarm[0], lws->init_swarm[0] );
-
-	ccl_kernel_set_arg( krnl->init_swarm, 0, dev_buff->swarm[0] );
-	ccl_kernel_set_arg( krnl->init_swarm, 1, dev_buff->swarm[1] );
-	ccl_kernel_set_arg( krnl->init_swarm, 2, dev_buff->swarm_map );
-	ccl_kernel_set_arg( krnl->init_swarm, 3, dev_buff->unhappiness );
-	ccl_kernel_set_arg( krnl->init_swarm, 4, dev_buff->rng_state );
 
 	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->init_swarm, oclobj->queue, DIMS_1, NULL, gws->init_swarm, lws->init_swarm, &ewl, &err_init );
 	ccl_if_err_propagate_goto( err, err_init, error_handler );
@@ -884,11 +961,16 @@ int main ( int argc, char *argv[] )
 	setupOCLObjects( &oclobj, &params, &err );
 	ccl_if_err_goto( err, error_handler );
 
-	setupHBKernels( &krnl, &gws, &lws, &oclobj, &params, &err );
-	ccl_if_err_goto( err, error_handler );
-
 	setupBuffers( &hst_buff, &dev_buff, &bufsz, &oclobj, &params, &err );
 	ccl_if_err_goto( err, error_handler );
+
+	getKernels( &krnl, &gws, &lws, &oclobj, &params, &err );
+	ccl_if_err_goto( err, error_handler );
+
+	/* Set the permanent kernel parameters (i.e. the buffers.). */
+	setKernelParameters( &krnl, &dev_buff );
+
+
 
 
 
