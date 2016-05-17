@@ -27,21 +27,23 @@
  * The kernel in this file expect the following preprocessor defines, passed to
  * kernel at compile time with -D option:
  *
- *		INIT_SEED
- *		BUGS_TEMPERATURE_MIN_IDEAL
- *		BUGS_TEMPERATURE_MAX_IDEAL
- *		BUGS_HEAT_MIN_OUTPUT
- *		BUGS_HEAT_MAX_OUTPUT
- *		BUGS_RANDOM_MOVE_CHANCE
- *		WORLD_DIFFUSION_RATE
- *		WORLD_EVAPORATION_RATE
- *		BUGS_NUMBER
- *		WORLD_WIDTH
- *		WORLD_HEIGHT
- *		WORLD_SIZE
+	INIT_SEED
+	REDOX_NUM_WORKGROUPS
+	BUGS_NUMBER
+	WORLD_WIDTH
+	WORLD_HEIGHT
+	WORLD_SIZE
+	WORLD_DIFFUSION_RATE
+	WORLD_EVAPORATION_RATE
+	BUGS_RANDOM_MOVE_CHANCE
+	BUGS_TEMPERATURE_MIN_IDEAL
+	BUGS_TEMPERATURE_MAX_IDEAL
+	BUGS_HEAT_MIN_OUTPUT
+	BUGS_HEAT_MAX_OUTPUT
  * */
 
 
+/*!	Kernel version: 8	!*/
 
 
 
@@ -695,18 +697,19 @@ __kernel void unhappiness_step1_reduce( __global float *unhappiness, __local flo
 	{
 		index = iter * global_size + gid;
 
+		/* For workitems out of range, sum = 0.0 */
 		if (index < BUGS_NUMBER)
 			sum += unhappiness[ index ];
 	}
 
-	/* Store sum in local memory. */
+	/* All workitems (including out of range (sum = 0.0)), store sum in local memory. */
 	partial_sums[ lid ] = sum;
 
 	/* Wait for all workitems to perform previous operations. */
 	barrier( CLK_LOCAL_MEM_FENCE );
 
 
-	/* Reduce */
+	/* Reduce. */
 	for (iter = group_size / 2; iter > 0; iter >>= 1)
 	{
 		if (lid < iter)	{
