@@ -36,9 +36,9 @@
 
 /** Default parameters. */
 #define NUM_ITERATIONS			1000		/* 1000 (0 = non stop). */
-#define BUGS_NUMBER				20			/* 100 Bugs in the world. */
-#define WORLD_WIDTH				5
-#define WORLD_HEIGTH			5
+#define BUGS_NUMBER				100			/* 100 Bugs in the world. */
+#define WORLD_WIDTH				100
+#define WORLD_HEIGTH			100
 #define WORLD_DIFFUSION_RATE	0.90f		/* % temperature to adjacent cells [0..1] */
 #define WORLD_EVAPORATION_RATE	0.01f		/* % temperature's loss to 'ether' [0..1] */
 
@@ -162,6 +162,7 @@ typedef struct hb_host_buffers {
 	cl_uint *swarm_map;			/* SIZE: WORLD_SIZE	- Bugs map. Each cell is: 'ideal-Temperature':8bit 'bug':1bit 'output_heat':7bit. */
 	cl_float *heat_map[2];		/* SIZE: WORLD_SIZE	- Temperature map (heat_map) & the buffer (heat_buffer). DEBUG: (to remove). */
 	cl_float *unhappiness;		/* SIZE: NUM_BUGS	- The Unhappiness vector. */
+	cl_float *unhapp_reduced;
 	cl_float *unhapp_average;	/* SIZE: 1			- Unhappiness average. The expected result at the end of each iteration. */
 } HBHostBuffers_t;
 
@@ -173,6 +174,7 @@ typedef struct hb_device_buffers {
 	CCLBuffer *swarm_map;		/* SIZE: WORLD_SIZE	- Bugs map. Each cell is: 'ideal-Temperature':8bit 'bug':1bit 'output_heat':7bit. */
 	CCLBuffer *heat_map[2];		/* SIZE: WORLD_SIZE	- Temperature map (heat_map) & the buffer (heat_buffer). */
 	CCLBuffer *unhappiness;		/* SIZE: NUM_BUGS	- The Unhappiness vector. */
+	CCLBuffer *unhapp_reduced;
 	CCLBuffer *unhapp_average;	/* SIZE: 1			- Unhappiness average. The expected result at the end of each iteration. */
 } HBDeviceBuffers_t;
 
@@ -184,6 +186,7 @@ typedef struct hb_buffers_size {
 	size_t swarm_map;			/* VAL: WORLD_SIZE * sizeof( cl_uint ) */
 	size_t heat_map;			/* VAL: WORLD_SIZE * sizeof( cl_float ) */
 	size_t unhappiness;			/* VAL: BUGS_NUM * sizeof( cl_float ) */
+	size_t unhapp_reduced;
 	size_t unhapp_average;		/* VAL: 1 * sizeof( cl_float ) */
 } HBBuffersSize_t;
 
@@ -250,7 +253,7 @@ static GQuark hb_error_quark( void ) {
  * @param[out]	params		Parameters to be filled with default or from command line.
  * @param[in]	argc		Command line argument counter.
  * @param[in]	argv		Command line arguments.
- * @param[out]	err			GLib error object for error reporting.
+ * @param[out]	err			GLib object for error reporting.
  * */
 static void getSimulParameters( Parameters_t *const params, int argc, char *argv[], GError **err )
 {
@@ -372,12 +375,11 @@ error_handler:
  *
  * @param[out]	oclobj		A structure holding the pointers for each OpenCL object.
  * @param[in]	params		The simulation parameters. Used to create the program's compiler options.
- * @param[out]	err			GLib error object for error reporting.
+ * @param[out]	err			GLib object for error reporting.
  * */
-static void getOCLObjects( OCLObjects_t *const oclobj, HBGlobalWorkSizes_t *const gws, HBLocalWorkSizes_t *const lws, const Parameters_t *const params, GError **err )
+static void getOCLObjects( OCLObjects_t *const oclobj, HBGlobalWorkSizes_t *const gws, HBLocalWorkSizes_t *const lws, Parameters_t *const params, GError **err )
 {
 	cl_uint init_seed;
-	size_t redox_num_workgroups;
 
 	char cl_compiler_opts[512];			/* OpenCL built in compiler/builder parameters. */
 
@@ -387,9 +389,11 @@ static void getOCLObjects( OCLObjects_t *const oclobj, HBGlobalWorkSizes_t *cons
 
 	/* Read initial seed from linux /dev/urandom */
 	uranddev = fopen( "/dev/urandom", "r" );
+	ccl_if_err_create_goto( *err, HB_ERROR, uranddev == NULL, HB_UNABLE_OPEN_FILE, error_handler, "Could not open urandom device to get seed." );
+
 	fread( &init_seed, sizeof(cl_uint), 1, uranddev );
 	fclose( uranddev );
-	/* TODO: error handler here. */
+
 
 	/* *** GPU preparation. Initiate OpenCL objects. *** */
 
@@ -424,11 +428,15 @@ static void getOCLObjects( OCLObjects_t *const oclobj, HBGlobalWorkSizes_t *cons
 	ccl_kernel_suggest_worksizes( NULL, oclobj->dev, DIMS_1, &params->bugs_number, gws->unhapp_stp1_reduce, lws->unhapp_stp1_reduce, &err_get_oclobj );
 	ccl_if_err_propagate_goto( err, err_get_oclobj, error_handler );
 
-	redox_num_workgroups = gws->unhapp_stp1_reduce[ 0 ] / lws->unhapp_stp1_reduce[ 0 ];
+	/* MIN(...) included by cf4ocl2 from glib/gmacros.h. */
+	gws->unhapp_stp1_reduce[ 0 ] = MIN( SQUARE( lws->unhapp_stp1_reduce[ 0 ] ), gws->unhapp_stp1_reduce[ 0 ] );
+
+	params->redox_num_workgroups = gws->unhapp_stp1_reduce[ 0 ] / lws->unhapp_stp1_reduce[ 0 ];
+
 
 	sprintf( cl_compiler_opts, cl_compiler_opts_template,
 				init_seed,
-				redox_num_workgroups,
+				params->redox_num_workgroups,
 				params->bugs_number,
 				params->world_width,
 				params->world_height,
@@ -466,7 +474,7 @@ error_handler:
  * @param[out]	bufsz		The structure with all the buffer sizes to be computed from 'params'. Sizes are common to host and device buffers.
  * @param[in]	oclObj		The structure to the previously created OpenCl objects. From this we need the 'context' in which to create the buffers.
  * @param[in]	params		The structure with all simulation parameters. Used to compute buffer sizes.
- * @param[out]	err			GLib error object for error reporting.
+ * @param[out]	err			GLib object for error reporting.
  * */
 static void setupBuffers( HBHostBuffers_t *const hst_buff, HBDeviceBuffers_t *const dev_buff, HBBuffersSize_t *const bufsz, const OCLObjects_t *const oclobj, const Parameters_t *const params, GError **err )
 {
@@ -547,6 +555,17 @@ static void setupBuffers( HBHostBuffers_t *const hst_buff, HBDeviceBuffers_t *co
 	ccl_if_err_propagate_goto( err, err_setbuf, error_handler );
 
 
+	/** UNHAPPINESS REDUCED - all group sum to global memory. */
+
+	bufsz->unhapp_reduced = params->redox_num_workgroups * sizeof( cl_float );
+
+	hst_buff->unhapp_reduced = ( cl_float *) malloc( bufsz->unhapp_reduced );
+	ccl_if_err_create_goto( *err, HB_ERROR, hst_buff->unhapp_reduced == NULL, HB_MALLOC_FAILURE, error_handler, "Unable to allocate host memory for bugs unhappiness reduced." );
+
+	dev_buff->unhapp_reduced = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE, bufsz->unhapp_reduced, NULL, &err_setbuf );
+	ccl_if_err_propagate_goto( err, err_setbuf, error_handler );
+
+
 	/** UNHAPPINESS AVERAGE - To get the result. */
 
 	bufsz->unhapp_average = sizeof( cl_float );
@@ -574,7 +593,7 @@ error_handler:
  * @param[out]	lws
  * @param[in]	oclobj
  * @param[in]	params
- * @param[out]	err			GLib error object for error reporting.
+ * @param[out]	err			GLib object for error reporting.
  * */
 static void getKernels( HBKernels_t *const krnl, HBGlobalWorkSizes_t *const gws, HBLocalWorkSizes_t *const lws, const OCLObjects_t *const oclobj, const Parameters_t *const params, GError **err )
 {
@@ -643,8 +662,7 @@ static void getKernels( HBKernels_t *const krnl, HBGlobalWorkSizes_t *const gws,
 	krnl->unhapp_stp1_reduce = ccl_kernel_new( oclobj->prg, KERNEL_NAME__UNHAPPINESS_S1_REDUCE, &err_getkernels );
 	ccl_if_err_propagate_goto( err, err_getkernels, error_handler );
 
-//	ccl_kernel_suggest_worksizes( krnl->unhapp_stp1_reduce, oclobj->dev, DIMS_1, &params->bugs_number, gws->unhapp_stp1_reduce, lws->unhapp_stp1_reduce, &err_getkernels );
-//	ccl_if_err_propagate_goto( err, err_getkernels, error_handler );
+	/* Worksizes previously computed. */
 
 	printf( "[ kernel ]: unhapp_stp1_reduce.\n    '-> bugs_num = %zu; gws = %zu; lws = %zu\n", params->bugs_number, gws->unhapp_stp1_reduce[0], lws->unhapp_stp1_reduce[0] );
 
@@ -654,8 +672,9 @@ static void getKernels( HBKernels_t *const krnl, HBGlobalWorkSizes_t *const gws,
 	krnl->unhapp_stp2_average = ccl_kernel_new( oclobj->prg, KERNEL_NAME__UNHAPPINESS_S2_AVERAGE, &err_getkernels );
 	ccl_if_err_propagate_goto( err, err_getkernels, error_handler );
 
-//	ccl_kernel_suggest_worksizes( krnl->unhapp_stp2_average, oclobj->dev, DIMS_1, &params->bugs_number, gws->unhapp_stp2_average, lws->unhapp_stp2_average, &err_getkernels );
-//	ccl_if_err_propagate_goto( err, err_getkernels, error_handler );
+	/* To be consistente. */
+
+
 
 
 	printf( "\n" );
@@ -671,7 +690,7 @@ error_handler:
 
 /**
  * */
-static void setKernelParameters( HBKernels_t *const krnl, HBDeviceBuffers_t *const dev_buff )
+static void setKernelParameters( HBKernels_t *const krnl, HBDeviceBuffers_t *const dev_buff, HBLocalWorkSizes_t *const lws )
 {
 	/* 'init_random' kernel arguments. */
 	ccl_kernel_set_arg( krnl->init_random, 0, dev_buff->rng_state );	/* Random numbers. One per bug. */
@@ -700,14 +719,15 @@ static void setKernelParameters( HBKernels_t *const krnl, HBDeviceBuffers_t *con
 	ccl_kernel_set_arg( krnl->comp_world_heat, 0, dev_buff->heat_map[0] );
 	ccl_kernel_set_arg( krnl->comp_world_heat, 1, dev_buff->heat_map[1] );
 
-	/* 'unhappiness_step1_reduce' kernel arguments. */
-//	ccl_kernel_set_arg( krnl->unhapp_stp1_reduce, 0, dev_buff->unhappiness );
-//	ccl_kernel_set_arg( krnl->unhapp_stp1_reduce, 1, );
+	/* 'unhappiness_stp1_reduce' kernel arguments. */
+	ccl_kernel_set_arg( krnl->unhapp_stp1_reduce, 0, dev_buff->unhappiness );
+	ccl_kernel_set_arg( krnl->unhapp_stp1_reduce, 1, ccl_arg_local( lws->unhapp_stp1_reduce[ 0 ], cl_float ) );
+	ccl_kernel_set_arg( krnl->unhapp_stp1_reduce, 2, dev_buff->unhapp_reduced );
 
-	/* 'unhappiness_step2_average' kernel arguments. */
-//	ccl_kernel_set_arg();
-//	ccl_kernel_set_arg();
-//	ccl_kernel_set_arg();
+	/* 'unhappiness_stp2_average' kernel arguments. */
+	ccl_kernel_set_arg( krnl->unhapp_stp2_average, 0, dev_buff->unhapp_reduced );
+//	ccl_kernel_set_arg( krnl->unhapp_stp2_average, 1, ccl_arg_local( lws) );
+//	ccl_kernel_set_arg( krnl->unhapp_stp2_average, 2, );
 
 	return;
 }
@@ -1019,7 +1039,7 @@ int main ( int argc, char *argv[] )
 	ccl_if_err_goto( err, error_handler );
 
 	/* Set the permanent kernel parameters (i.e. the buffers.). */
-	setKernelParameters( &krnl, &dev_buff );
+	setKernelParameters( &krnl, &dev_buff, &lws );
 
 
 	iter_counter = 0;
@@ -1030,9 +1050,8 @@ int main ( int argc, char *argv[] )
 
 	/* Open output file for results. */
 	hbResult = fopen( params.output_filename, "w+" );	/* Open file overwrite. */
+	ccl_if_err_create_goto( err, HB_ERROR, hbResult == NULL, HB_UNABLE_OPEN_FILE, error_handler, "Could not open output file." );
 
-	if (hbResult == NULL)
-		ERROR_MSG_AND_EXIT( "Error: Could not open output file." );
 
 
 	/** Run all init kernels. */
@@ -1060,6 +1079,7 @@ clean_all:
 
 	/* Destroy host buffers. */
 	if (hst_buff.unhapp_average)	free( hst_buff.unhapp_average );
+	if (hst_buff.unhapp_reduced)	free( hst_buff.unhapp_reduced );
 	if (hst_buff.unhappiness)		free( hst_buff.unhappiness );
 	if (hst_buff.heat_map[1])		free( hst_buff.heat_map[1] );
 	if (hst_buff.heat_map[0])		free( hst_buff.heat_map[0] );
@@ -1070,6 +1090,7 @@ clean_all:
 
 	/* Destroy Device buffers. */
 	if (dev_buff.unhapp_average)	ccl_buffer_destroy( dev_buff.unhapp_average );
+	if (dev_buff.unhapp_reduced)	ccl_buffer_destroy( dev_buff.unhapp_reduced );
 	if (dev_buff.unhappiness)		ccl_buffer_destroy( dev_buff.unhappiness );
 	if (dev_buff.heat_map[1])		ccl_buffer_destroy( dev_buff.heat_map[1] );
 	if (dev_buff.heat_map[0])		ccl_buffer_destroy( dev_buff.heat_map[0] );

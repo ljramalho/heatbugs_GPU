@@ -57,9 +57,6 @@
 #pragma OPENCL EXTENSION cl_khr_local_int32_extended_atomics : enable
 
 
-/* TODO: To be deleted */
-#define UNHAPP_REDOX_S2_NUM_WORKGROUPS 32
-
 
 /* Used to drive what shall happen to the agent at each step. */
 #define FIND_ANY_FREE			0x00ffffff
@@ -660,7 +657,7 @@ __kernel void comp_world_heat( __global float *heat_map, __global float *heat_bu
 /*
  *
  */
-__kernel void unhappiness_step1_reduce( __global float *unhappiness, __local float *partial_sums )
+__kernel void unhappiness_step1_reduce( __global float *unhappiness, __local float *partial_sums, __global float *unhapp_reduced )
 {
 	const uint gid = get_global_id( 0 );
 	const uint lid = get_local_id( 0 );
@@ -718,9 +715,9 @@ __kernel void unhappiness_step1_reduce( __global float *unhappiness, __local flo
 		barrier( CLK_LOCAL_MEM_FENCE );
 	}
 
-	/* Put in back in global memory and reuse the unhappiness vector. */
+	/* Store in global memory. */
 	if (lid == 0) {
-		unhappiness[ get_group_id( 0 ) ] = partial_sums[ 0 ];
+		unhapp_reduced[ get_group_id( 0 ) ] = partial_sums[ 0 ];
 	}
 
 	return;
@@ -728,7 +725,7 @@ __kernel void unhappiness_step1_reduce( __global float *unhappiness, __local flo
 
 
 
-__kernel void unhappiness_step2_average( __global float *unhappiness, __local float *partial_sums, __global float *unhapp_average )
+__kernel void unhappiness_step2_average( __global float *unhapp_reduced, __local float *partial_sums, __global float *unhapp_average )
 {
 	__private uint iter;
 
@@ -743,7 +740,7 @@ __kernel void unhappiness_step2_average( __global float *unhappiness, __local fl
 //	else
 //		partial_sums[ lid ] = 0;
 
-	partial_sums[ lid ] = select( 0.0f, unhappiness[ lid ], lid < UNHAPP_REDOX_S2_NUM_WORKGROUPS );
+	partial_sums[ lid ] = select( 0.0f, unhappiness[ lid ], lid < REDOX_NUM_WORKGROUPS );
 
 	barrier( CLK_LOCAL_MEM_FENCE );
 

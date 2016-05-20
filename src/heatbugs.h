@@ -36,6 +36,8 @@
 /* Evaluate to 1 if 'val' is an odd integer, evaluate to 0 if 'val' is an even integer. */
 #define IS_ODD( val ) ((val) & 1)
 
+/* Return the value's square. */
+#define SQUARE( x ) ((x) * (x))
 
 
 /** Heatbugs own error manipulation. **/
@@ -49,9 +51,9 @@ enum hb_error_codes {
 	/** Unknown option in the command line. */
 	HB_PARAM_OPTION_UNKNOWN = -3,
 	/** Unknown option characters in command line. */
-	HB_PARAM_CHAR_UNKNOWN = 4,
+	HB_PARAM_CHAR_UNKNOWN = -4,
 	/** Weird error occurred while parsing parameter. */
-	HB_PARAM_PARSING = 5,
+	HB_PARAM_PARSING = -5,
 	/** Number of bugs is zero. */
 	HB_BUGS_ZERO = -6,
 	/** Bugs exceed world slots. */
@@ -61,9 +63,9 @@ enum hb_error_codes {
 	/** Bug's max ideal temperature exceeds range. */
 	HB_TEMPERATURE_OUT_RANGE = -9,
 	/** Bug's output heat range overlap. */
-	HB_OUTPUT_HEAT_OVERLAP = 10,
+	HB_OUTPUT_HEAT_OVERLAP = -10,
 	/** Bug's max output heat exceeds range. */
-	HB_OUTPUT_HEAT_OUT_RANGE = 11,
+	HB_OUTPUT_HEAT_OUT_RANGE = -11,
 	/** Unable to open file. */
 	HB_UNABLE_OPEN_FILE = -12,
 	/** Memory alocation failed. */
