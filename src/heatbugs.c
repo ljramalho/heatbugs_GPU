@@ -162,7 +162,7 @@ typedef struct hb_host_buffers {
 	cl_uint *swarm_map;			/* SIZE: WORLD_SIZE	- Bugs map. Each cell is: 'ideal-Temperature':8bit 'bug':1bit 'output_heat':7bit. */
 	cl_float *heat_map[2];		/* SIZE: WORLD_SIZE	- Temperature map (heat_map) & the buffer (heat_buffer). DEBUG: (to remove). */
 	cl_float *unhappiness;		/* SIZE: NUM_BUGS	- The Unhappiness vector. */
-	cl_float *unhapp_reduced;
+	cl_float *unhapp_reduced;	/* SIZE: REDOX_NUM_WORKGROUPS - The number of workgroups performing reduction. */
 	cl_float *unhapp_average;	/* SIZE: 1			- Unhappiness average. The expected result at the end of each iteration. */
 } HBHostBuffers_t;
 
@@ -174,7 +174,7 @@ typedef struct hb_device_buffers {
 	CCLBuffer *swarm_map;		/* SIZE: WORLD_SIZE	- Bugs map. Each cell is: 'ideal-Temperature':8bit 'bug':1bit 'output_heat':7bit. */
 	CCLBuffer *heat_map[2];		/* SIZE: WORLD_SIZE	- Temperature map (heat_map) & the buffer (heat_buffer). */
 	CCLBuffer *unhappiness;		/* SIZE: NUM_BUGS	- The Unhappiness vector. */
-	CCLBuffer *unhapp_reduced;
+	CCLBuffer *unhapp_reduced;	/* SIZE: REDOX_NUM_WORKGROUPS - The number of workgroups performing reduction. */
 	CCLBuffer *unhapp_average;	/* SIZE: 1			- Unhappiness average. The expected result at the end of each iteration. */
 } HBDeviceBuffers_t;
 
@@ -186,7 +186,7 @@ typedef struct hb_buffers_size {
 	size_t swarm_map;			/* VAL: WORLD_SIZE * sizeof( cl_uint ) */
 	size_t heat_map;			/* VAL: WORLD_SIZE * sizeof( cl_float ) */
 	size_t unhappiness;			/* VAL: BUGS_NUM * sizeof( cl_float ) */
-	size_t unhapp_reduced;
+	size_t unhapp_reduced;		/* VAL: REDOX_NUM_WORKGROUPS * sizeof( cl_float ) */
 	size_t unhapp_average;		/* VAL: 1 * sizeof( cl_float ) */
 } HBBuffersSize_t;
 
@@ -342,7 +342,7 @@ static void getSimulParameters( Parameters_t *const params, int argc, char *argv
 	params->world_size = params->world_height * params->world_width;
 
 
-	/* Check for bug's number realted errors. */
+	/* Check for bug's number related errors. */
 	ccl_if_err_create_goto( *err, HB_ERROR, params->bugs_number == 0, HB_BUGS_ZERO, error_handler, "There are no bugs." );
 	ccl_if_err_create_goto( *err, HB_ERROR, params->bugs_number >= params->world_size, HB_BUGS_OVERFLOW, error_handler, "Number of bugs exceed available world slots." );
 
@@ -416,19 +416,22 @@ static void getOCLObjects( OCLObjects_t *const oclobj, HBGlobalWorkSizes_t *cons
 	oclobj->prg = ccl_program_new_from_source_file( oclobj->ctx, CL_KERNEL_SRC_FILE, &err_get_oclobj );
 	ccl_if_err_propagate_goto( err, err_get_oclobj, error_handler );
 
-
 	/*
-	 *	Get OpenCL build options to be sent as 'defines' to kernel,
-	 *	preventing the need to send extra arguments to kernel. These
-	 *	work as 'work-items' private variables.
-	 *	A null terminated string is granted in 'cl_compiler_opts'.
+	 *	Get OpenCL build options to be sent as 'defines' to kernel, preventing
+	 * the need to send extra arguments. These parameters work as 'work-items'
+	 * private variables. A null terminated string is garanted in 'cl_compiler_opts'.
 	 */
 
 	/* First, query device for importante parameters before program's build. */
 	ccl_kernel_suggest_worksizes( NULL, oclobj->dev, DIMS_1, &params->bugs_number, gws->unhapp_stp1_reduce, lws->unhapp_stp1_reduce, &err_get_oclobj );
 	ccl_if_err_propagate_goto( err, err_get_oclobj, error_handler );
 
-	/* MIN(...) included by cf4ocl2 from glib/gmacros.h. */
+	/*
+	* MIN(...) included by cf4ocl2 from glib/gmacros.h.
+	*
+	* Next line, bounds the size of global worksize into the square of the
+	* local worksize, so reduce step 1 work.
+	*/
 	gws->unhapp_stp1_reduce[ 0 ] = MIN( SQUARE( lws->unhapp_stp1_reduce[ 0 ] ), gws->unhapp_stp1_reduce[ 0 ] );
 
 	params->redox_num_workgroups = gws->unhapp_stp1_reduce[ 0 ] / lws->unhapp_stp1_reduce[ 0 ];
@@ -662,7 +665,7 @@ static void getKernels( HBKernels_t *const krnl, HBGlobalWorkSizes_t *const gws,
 	krnl->unhapp_stp1_reduce = ccl_kernel_new( oclobj->prg, KERNEL_NAME__UNHAPPINESS_S1_REDUCE, &err_getkernels );
 	ccl_if_err_propagate_goto( err, err_getkernels, error_handler );
 
-	/* Worksizes previously computed. */
+	/* gws->unhapp_stp1_reduce and lws->unhapp_stp1_reduce were previously computed in function 'getOCLObjects(...)' */
 
 	printf( "[ kernel ]: unhapp_stp1_reduce.\n    '-> bugs_num = %zu; gws = %zu; lws = %zu\n", params->bugs_number, gws->unhapp_stp1_reduce[0], lws->unhapp_stp1_reduce[0] );
 
@@ -672,8 +675,9 @@ static void getKernels( HBKernels_t *const krnl, HBGlobalWorkSizes_t *const gws,
 	krnl->unhapp_stp2_average = ccl_kernel_new( oclobj->prg, KERNEL_NAME__UNHAPPINESS_S2_AVERAGE, &err_getkernels );
 	ccl_if_err_propagate_goto( err, err_getkernels, error_handler );
 
-	/* To be consistente. */
-
+	/* For reduction step 2, gws must be equal to lws, so there is only one workgroup. */
+	gws->unhapp_stp2_average[ 0 ] = params->redox_num_workgroups;
+	lws->unhapp_stp2_average[ 0 ] = params->redox_num_workgroups;
 
 
 
@@ -689,6 +693,11 @@ error_handler:
 
 
 /**
+ * Set kernels permanent parameters.
+ *
+ * @param[in]	krnl		Structure holding all kernels.
+ * @param[in]	dev_buff	Structure holding all buffers required to be setted as kernel parameters.
+ * @param[in]	lws			The local Work Size will be used to set device's local memory to be passed to kernel.
  * */
 static void setKernelParameters( HBKernels_t *const krnl, HBDeviceBuffers_t *const dev_buff, HBLocalWorkSizes_t *const lws )
 {
@@ -711,7 +720,7 @@ static void setKernelParameters( HBKernels_t *const krnl, HBDeviceBuffers_t *con
 	ccl_kernel_set_arg( krnl->bug_step, 0, dev_buff->swarm[0] );
 	ccl_kernel_set_arg( krnl->bug_step, 1, dev_buff->swarm[1] );
 	ccl_kernel_set_arg( krnl->bug_step, 2, dev_buff->swarm_map );
-	ccl_kernel_set_arg( krnl->bug_step, 3, dev_buff->heat_map[0] );
+	ccl_kernel_set_arg( krnl->bug_step, 3, dev_buff->heat_map[0] );		/* Not permanent. Exchangeable by heat_map[ 1 ] */
 	ccl_kernel_set_arg( krnl->bug_step, 4, dev_buff->unhappiness );
 	ccl_kernel_set_arg( krnl->bug_step, 5, dev_buff->rng_state );
 
@@ -726,8 +735,8 @@ static void setKernelParameters( HBKernels_t *const krnl, HBDeviceBuffers_t *con
 
 	/* 'unhappiness_stp2_average' kernel arguments. */
 	ccl_kernel_set_arg( krnl->unhapp_stp2_average, 0, dev_buff->unhapp_reduced );
-//	ccl_kernel_set_arg( krnl->unhapp_stp2_average, 1, ccl_arg_local( lws) );
-//	ccl_kernel_set_arg( krnl->unhapp_stp2_average, 2, );
+//	ccl_kernel_set_arg( krnl->unhapp_stp2_average, 1, ccl_arg_local(  );
+	ccl_kernel_set_arg( krnl->unhapp_stp2_average, 2, dev_buff->unhapp_average );
 
 	return;
 }
@@ -742,9 +751,9 @@ static inline void initiate( HBKernels_t *const krnl, HBGlobalWorkSizes_t *const
 	GError *err_init = NULL;
 
 	/** Events. */
-	CCLEvent *evt_rdwr = NULL;			/* Event signal for reads and writes. */
-	CCLEvent *evt_krnl_exec = NULL;		/* Event signal for kernel execution. */
-	CCLEventWaitList ewl = NULL;		/* A list of OpenCL events. */
+	CCLEvent *evt_rdwr = NULL;			/* Event termination signal for reads and writes. */
+	CCLEvent *evt_krnl_exec = NULL;		/* Event termination signal for kernel execution. */
+	CCLEventWaitList ewl = NULL;		/* Event Waiting List. A list of OpenCL events for operations to be finished. */
 
 
 	/** INIT RANDOM. */
@@ -929,9 +938,9 @@ static inline void comp_world_heat( HBKernels_t *const krnl, HBGlobalWorkSizes_t
 	GError *err_comp_world_heat = NULL;
 
 	/** Events. */
-	CCLEvent *evt_rdwr = NULL;			/* Event signal for reads and writes. */
-	CCLEvent *evt_krnl_exec = NULL;		/* Event signal for kernel execution. */
-	CCLEventWaitList ewl = NULL;		/* A list of OpenCL events. */
+	CCLEvent *evt_rdwr = NULL;			/* Event termination signal for reads and writes. */
+	CCLEvent *evt_krnl_exec = NULL;		/* Event termination signal for kernel execution. */
+	CCLEventWaitList ewl = NULL;		/* Event Waiting List. A list of OpenCL events for operations to be finished. */
 
 
 	printf( "Compute world heat:\n\tgws = [%zu,%zu]; lws = [%zu,%zu]\n\n", gws->comp_world_heat[0], gws->comp_world_heat[1], lws->comp_world_heat[0], lws->comp_world_heat[1] );
@@ -1022,6 +1031,10 @@ int main ( int argc, char *argv[] )
 	HBBuffersSize_t bufsz;
 
 
+	/* Events */
+	CCLEvent *evt_krnl_exec = NULL;		/* Event termination signal for kernel execution. */
+	CCLEventWaitList ewl = NULL;		/* Event Waiting List. A list of OpenCL events for operations to be finished. */
+
 	cl_uint iter_counter;
 
 
@@ -1042,11 +1055,6 @@ int main ( int argc, char *argv[] )
 	setKernelParameters( &krnl, &dev_buff, &lws );
 
 
-	iter_counter = 0;
-
-
-
-
 
 	/* Open output file for results. */
 	hbResult = fopen( params.output_filename, "w+" );	/* Open file overwrite. */
@@ -1058,9 +1066,39 @@ int main ( int argc, char *argv[] )
 	initiate( &krnl, &gws, &lws, &oclobj, &dev_buff, &hst_buff, &bufsz, &params, &err );
 	ccl_if_err_goto( err, error_handler );
 
-	comp_world_heat( &krnl, &gws, &lws, &oclobj, &dev_buff, &hst_buff, &bufsz, &params, &err );
+
+
+
+	iter_counter = 0;
+
+	/* Call reduction first.*/
+	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl.unhapp_stp1_reduce, oclobj.queue, DIMS_1, NULL, gws.unhapp_stp1_reduce, lws.unhapp_stp1_reduce, &ewl, &err );
 	ccl_if_err_goto( err, error_handler );
 
+	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl.unhapp_stp2_average, oclobj.queue, DIMS_1, NULL, gws.unhapp_stp2_average, lws.unhapp_stp2_average, &ewl, &err );
+	ccl_if_err_goto( err, error_handler );
+
+	/* TODO: Read result. */
+
+	/* TODO: Output result to file. */
+
+
+
+	while( (iter_counter < params.numIterations) || (params.numIterations == 0) )
+	{
+		/* TODO: Call every kenel. */
+		comp_world_heat( &krnl, &gws, &lws, &oclobj, &dev_buff, &hst_buff, &bufsz, &params, &err );
+		ccl_if_err_goto( err, error_handler );
+
+		/* TODO:Output to file. */
+
+		iter_counter ++;
+	}
+
+	fclose( hbResult );
+
+
+	/* TODO: Profiling. */
 
 
 	goto clean_all;

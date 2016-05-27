@@ -671,7 +671,7 @@ __kernel void unhappiness_step1_reduce( __global float *unhappiness, __local flo
 	   The size of vector unhappiness is the number of bugs (BUGS_NUMBER).
 	   So we must take care of both cases, when BUGS_NUMBER > global_size, and
 	   when global_size > BUGS_NUMBER.
-	   This is what happen in the next loop...
+	   This is what happen in the next loop ('sum' is private to each workitem)...
 
 	   When: (BUGS_NUMBER < global_size) -> serialCount = 1
 	   			sum[0 .. BUGS_NUMBER - 1] = unhappiness[0 .. BUGS_NUMBER - 1]
@@ -735,7 +735,7 @@ __kernel void unhappiness_step2_average( __global float *unhapp_reduced, __local
 
 
 	/* Load partial sum in local memory */
-//	if (lid < REDUCE_GRASS_NUM_WORKGROUPS)
+//	if (lid < REDOX_NUM_WORKGROUPS)
 //		partial_sums[ lid ] = unhappiness[ lid ];
 //	else
 //		partial_sums[ lid ] = 0;
