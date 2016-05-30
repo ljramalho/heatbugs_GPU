@@ -48,7 +48,7 @@
 #define BUGS_HEAT_MIN_OUTPUT	15			/* [0 .. 100] */
 #define BUGS_HEAT_MAX_OUTPUT	25			/* [0 .. 100] */
 
-#define OUTPUT_FILEMNAME		"../results/heatbugsGPU.csv"	/* The file to send results. */
+#define OUTPUT_FILENAME			"../results/heatbugsGPU.csv"	/* The file to send results. Directory must exist. */
 
 
 
@@ -282,7 +282,7 @@ static void getSimulParameters( Parameters_t *const params, int argc, char *argv
 	params->bugs_heat_min_output = BUGS_HEAT_MIN_OUTPUT;			/* h */
 	params->bugs_heat_max_output = BUGS_HEAT_MAX_OUTPUT;			/* H */
 
-	strcpy( params->output_filename, OUTPUT_FILEMNAME );			/* f */
+	strcpy( params->output_filename, OUTPUT_FILENAME );				/* f */
 
 
 	/* Parse command line arguments using GNU's getopt function. */
@@ -1036,7 +1036,11 @@ int main ( int argc, char *argv[] )
 	CCLEvent *evt_krnl_exec = NULL;		/* Event termination signal for kernel execution. */
 	CCLEventWaitList ewl = NULL;		/* Event Waiting List. A list of OpenCL events for operations to be finished. */
 
-	cl_uint iter_counter;
+	/* Buffer selectors. At each step, the selectors swap value to indicate apropriate buffer to be send to kernel. */
+	cl_uint bufsel_main;				/* Main buffer selector. */
+	cl_uint bufsel_secd;				/* Secondary buffer selector. */
+
+	cl_uint iter_counter;				/* Iteration counter. */
 
 
 
@@ -1067,9 +1071,6 @@ int main ( int argc, char *argv[] )
 
 
 
-
-	iter_counter = 0;
-
 	/* Call reduction first.*/
 	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl.unhapp_stp1_reduce, oclobj.queue, DIMS_1, NULL, gws.unhapp_stp1_reduce, lws.unhapp_stp1_reduce, &ewl, &err_main );
 	ccl_if_err_goto( err_main, error_handler );
@@ -1080,7 +1081,7 @@ int main ( int argc, char *argv[] )
 	ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
 
 
-	/* TODO: Read result. Output result to file. */
+	/* TODO: Output result to file. */
 	evt_rdwr = ccl_buffer_enqueue_read( dev_buff.unhapp_average, oclobj.queue, NON_BLOCK, 0, bufsz.unhapp_average, hst_buff.unhapp_average, &ewl, &err_main );
 	ccl_if_err_goto( err_main, error_handler );
 
@@ -1091,7 +1092,11 @@ int main ( int argc, char *argv[] )
 
 	printf( "unhappiness avg = %f\n\n", *hst_buff.unhapp_average );
 
-	exit(0);
+
+	bufsel_main = 0;			/* On fist step, main buffer is the one with index 0. */
+	bufsel_secd = 1;			/* On first step, secondary buffer is the one with index 1. */
+
+	iter_counter = 0;
 
 	while( (iter_counter < params.numIterations) || (params.numIterations == 0) )
 	{
@@ -1101,6 +1106,8 @@ int main ( int argc, char *argv[] )
 
 		/* TODO:Output to file. */
 
+		/* Swap buffer's indices and increment the iteration counter. */
+		ZOSWAP( bufsel_main, bufsel_secd );
 		iter_counter ++;
 	}
 

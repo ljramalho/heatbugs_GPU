@@ -39,6 +39,15 @@
 /* Return the value's square. */
 #define SQUARE( x ) ((x) * (x))
 
+/* Swap two integer variables using XOR operations. */
+#define SWAP( a, b ) (((a) ^= (b)), ((b) ^= (a)), ((a) ^= (b)))
+
+/* ZOSWAP(a, b) a.k.a Zero One Swap. Swap two integer variables as long as they are 0 and 1, or 1 and 0. */
+#define ZOSWAP( a, b ) (a = (b)), (b = ((b) + 1) & 1)
+
+/* prepare two integer variables that will be swapped by ZOSWAP(...). */
+#define ZOINIT( a, b ) (a = 0), (b = 1)
+
 
 /** Heatbugs own error manipulation. **/
 enum hb_error_codes {
