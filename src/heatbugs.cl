@@ -740,7 +740,7 @@ __kernel void unhappiness_step2_average( __global float *unhapp_reduced, __local
 //	else
 //		partial_sums[ lid ] = 0;
 
-	partial_sums[ lid ] = select( 0.0f, unhappiness[ lid ], lid < REDOX_NUM_WORKGROUPS );
+	partial_sums[ lid ] = select( 0.0f, unhapp_reduced[ lid ], lid < REDOX_NUM_WORKGROUPS );
 
 	barrier( CLK_LOCAL_MEM_FENCE );
 

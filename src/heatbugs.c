@@ -429,8 +429,8 @@ static void getOCLObjects( OCLObjects_t *const oclobj, HBGlobalWorkSizes_t *cons
 	/*
 	* MIN(...) included by cf4ocl2 from glib/gmacros.h.
 	*
-	* Next line, bounds the size of global worksize into the square of the
-	* local worksize, so reduce step 1 work.
+	* Next line bound the size of global work size to the square of the
+	* local work size, so reduce step 1 work.
 	*/
 	gws->unhapp_stp1_reduce[ 0 ] = MIN( SQUARE( lws->unhapp_stp1_reduce[ 0 ] ), gws->unhapp_stp1_reduce[ 0 ] );
 
@@ -675,10 +675,11 @@ static void getKernels( HBKernels_t *const krnl, HBGlobalWorkSizes_t *const gws,
 	krnl->unhapp_stp2_average = ccl_kernel_new( oclobj->prg, KERNEL_NAME__UNHAPPINESS_S2_AVERAGE, &err_getkernels );
 	ccl_if_err_propagate_goto( err, err_getkernels, error_handler );
 
-	/* For reduction step 2, gws must be equal to lws, so there is only one workgroup. */
-	gws->unhapp_stp2_average[ 0 ] = params->redox_num_workgroups;
-	lws->unhapp_stp2_average[ 0 ] = params->redox_num_workgroups;
+	/* The following values for gws and lws must be the ones that allow the final reduction. There will be only one workgroup. */
+	gws->unhapp_stp2_average[ 0 ] = lws->unhapp_stp1_reduce[ 0 ];
+	lws->unhapp_stp2_average[ 0 ] = lws->unhapp_stp1_reduce[ 0 ];
 
+	printf( "[ kernel ]: unhapp_stp2_average.\n    '-> gws = %zu; lws = %zu\n", gws->unhapp_stp2_average[0], lws->unhapp_stp2_average[0] );
 
 
 	printf( "\n" );
@@ -735,7 +736,7 @@ static void setKernelParameters( HBKernels_t *const krnl, HBDeviceBuffers_t *con
 
 	/* 'unhappiness_stp2_average' kernel arguments. */
 	ccl_kernel_set_arg( krnl->unhapp_stp2_average, 0, dev_buff->unhapp_reduced );
-//	ccl_kernel_set_arg( krnl->unhapp_stp2_average, 1, ccl_arg_local(  );
+	ccl_kernel_set_arg( krnl->unhapp_stp2_average, 1, ccl_arg_local( lws->unhapp_stp2_average[ 0 ], cl_float ) );
 	ccl_kernel_set_arg( krnl->unhapp_stp2_average, 2, dev_buff->unhapp_average );
 
 	return;
@@ -1008,7 +1009,7 @@ error_handler:
 int main ( int argc, char *argv[] )
 {
 	FILE *hbResult = NULL;
-	GError *err = NULL;					/* Error reporting object, from GLib. */
+	GError *err_main = NULL;			/* Error reporting object, from GLib. */
 
 	Parameters_t params;				/* Host data; simulation parameters. */
 //	real_t average_unhapiness;			/* Unhapiness in host (buffer). */
@@ -1030,8 +1031,8 @@ int main ( int argc, char *argv[] )
 	/** Buffers sizes. */
 	HBBuffersSize_t bufsz;
 
-
 	/* Events */
+	CCLEvent *evt_rdwr = NULL;			/* Event termination signal for reads and writes. */
 	CCLEvent *evt_krnl_exec = NULL;		/* Event termination signal for kernel execution. */
 	CCLEventWaitList ewl = NULL;		/* Event Waiting List. A list of OpenCL events for operations to be finished. */
 
@@ -1039,32 +1040,30 @@ int main ( int argc, char *argv[] )
 
 
 
-	getSimulParameters( &params, argc, argv, &err );
-	ccl_if_err_goto( err, error_handler );
+	getSimulParameters( &params, argc, argv, &err_main );
+	ccl_if_err_goto( err_main, error_handler );
 
-	getOCLObjects( &oclobj, &gws, &lws, &params, &err );
-	ccl_if_err_goto( err, error_handler );
+	getOCLObjects( &oclobj, &gws, &lws, &params, &err_main );
+	ccl_if_err_goto( err_main, error_handler );
 
-	setupBuffers( &hst_buff, &dev_buff, &bufsz, &oclobj, &params, &err );
-	ccl_if_err_goto( err, error_handler );
+	setupBuffers( &hst_buff, &dev_buff, &bufsz, &oclobj, &params, &err_main );
+	ccl_if_err_goto( err_main, error_handler );
 
-	getKernels( &krnl, &gws, &lws, &oclobj, &params, &err );
-	ccl_if_err_goto( err, error_handler );
+	getKernels( &krnl, &gws, &lws, &oclobj, &params, &err_main );
+	ccl_if_err_goto( err_main, error_handler );
 
 	/* Set the permanent kernel parameters (i.e. the buffers.). */
 	setKernelParameters( &krnl, &dev_buff, &lws );
 
 
-
 	/* Open output file for results. */
 	hbResult = fopen( params.output_filename, "w+" );	/* Open file overwrite. */
-	ccl_if_err_create_goto( err, HB_ERROR, hbResult == NULL, HB_UNABLE_OPEN_FILE, error_handler, "Could not open output file." );
-
+	ccl_if_err_create_goto( err_main, HB_ERROR, hbResult == NULL, HB_UNABLE_OPEN_FILE, error_handler, "Could not open output file." );
 
 
 	/** Run all init kernels. */
-	initiate( &krnl, &gws, &lws, &oclobj, &dev_buff, &hst_buff, &bufsz, &params, &err );
-	ccl_if_err_goto( err, error_handler );
+	initiate( &krnl, &gws, &lws, &oclobj, &dev_buff, &hst_buff, &bufsz, &params, &err_main );
+	ccl_if_err_goto( err_main, error_handler );
 
 
 
@@ -1072,23 +1071,33 @@ int main ( int argc, char *argv[] )
 	iter_counter = 0;
 
 	/* Call reduction first.*/
-	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl.unhapp_stp1_reduce, oclobj.queue, DIMS_1, NULL, gws.unhapp_stp1_reduce, lws.unhapp_stp1_reduce, &ewl, &err );
-	ccl_if_err_goto( err, error_handler );
+	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl.unhapp_stp1_reduce, oclobj.queue, DIMS_1, NULL, gws.unhapp_stp1_reduce, lws.unhapp_stp1_reduce, &ewl, &err_main );
+	ccl_if_err_goto( err_main, error_handler );
 
-	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl.unhapp_stp2_average, oclobj.queue, DIMS_1, NULL, gws.unhapp_stp2_average, lws.unhapp_stp2_average, &ewl, &err );
-	ccl_if_err_goto( err, error_handler );
+	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl.unhapp_stp2_average, oclobj.queue, DIMS_1, NULL, gws.unhapp_stp2_average, lws.unhapp_stp2_average, &ewl, &err_main );
+	ccl_if_err_goto( err_main, error_handler );
 
-	/* TODO: Read result. */
-
-	/* TODO: Output result to file. */
+	ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
 
 
+	/* TODO: Read result. Output result to file. */
+	evt_rdwr = ccl_buffer_enqueue_read( dev_buff.unhapp_average, oclobj.queue, NON_BLOCK, 0, bufsz.unhapp_average, hst_buff.unhapp_average, &ewl, &err_main );
+	ccl_if_err_goto( err_main, error_handler );
+
+	ccl_event_wait_list_add( &ewl, evt_rdwr, NULL );
+
+	ccl_event_wait( &ewl, &err_main );
+	ccl_if_err_goto( err_main, error_handler );
+
+	printf( "unhappiness avg = %f\n\n", *hst_buff.unhapp_average );
+
+	exit(0);
 
 	while( (iter_counter < params.numIterations) || (params.numIterations == 0) )
 	{
 		/* TODO: Call every kenel. */
-		comp_world_heat( &krnl, &gws, &lws, &oclobj, &dev_buff, &hst_buff, &bufsz, &params, &err );
-		ccl_if_err_goto( err, error_handler );
+		comp_world_heat( &krnl, &gws, &lws, &oclobj, &dev_buff, &hst_buff, &bufsz, &params, &err_main );
+		ccl_if_err_goto( err_main, error_handler );
 
 		/* TODO:Output to file. */
 
@@ -1107,8 +1116,8 @@ int main ( int argc, char *argv[] )
 error_handler:
 
 	/* Handle error. */
-	fprintf( stderr, "Error: %s\n", err->message );
-	g_error_free( err );
+	fprintf( stderr, "Error: %s\n", err_main->message );
+	g_error_free( err_main );
 
 
 clean_all:
