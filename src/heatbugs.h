@@ -23,10 +23,6 @@
 #include <sys/types.h>
 
 
-/* Comment next to remove debug output. */
-//#define USE_DEBUG
-
-
 /* Evaluate to the number of elements of a staticaly defined vector. */
 #define VSIZE( v ) ( sizeof( v ) / sizeof( v[0] ) )
 
@@ -42,6 +38,40 @@
 /* Swap to values of indicated 'type'. */
 #define SWAP( type, a, b ) { type t = a; a = b; b = t; }
 
+
+
+/* Define NDEBUG for specific debug. Does not compile in windows. */
+#ifndef CCL_STRD
+	#ifdef NDEBUG
+		#define CCL_STRD G_STRFUNC
+	#else
+		#define CCL_STRD G_STRLOC
+	#endif
+#endif
+
+
+/* Error handling macros. Included here because it was removed from later cf4ocl2. */
+/* It relies on Glib. */
+
+#define hb_if_err_create_goto(err, quark, error_condition, error_code, label, msg, ...) \
+	if (error_condition) { \
+		g_debug(CCL_STRD); \
+		g_set_error(&(err), (quark), (error_code), (msg), ##__VA_ARGS__); \
+		goto label; \
+	}
+
+#define hb_if_err_goto(err, label) \
+	if ((err) != NULL) { \
+		g_debug(CCL_STRD); \
+		goto label; \
+	}
+
+#define hb_if_err_propagate_goto(err_dest, err_src, label) \
+	if ((err_src) != NULL) { \
+		g_debug(CCL_STRD); \
+		g_propagate_error(err_dest, err_src); \
+		goto label; \
+	}
 
 
 

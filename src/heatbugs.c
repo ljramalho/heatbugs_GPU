@@ -53,9 +53,9 @@
 					/* to 'ether'.                */
 
 #define BUGS_RAND_MOVE_CHANCE	0.00f	/* [0..100], Chance a bug will move.  */
-#define BUGS_TEMP_MIN_IDEAL	20	/* [0 .. 200] */
-#define BUGS_TEMP_MAX_IDEAL	30	/* [0 .. 200] */
-#define BUGS_HEAT_MIN_OUTPUT	15	/* [0 .. 100] */
+#define BUGS_TEMP_MIN_IDEAL	10	/* [0 .. 200] */
+#define BUGS_TEMP_MAX_IDEAL	40	/* [0 .. 200] */
+#define BUGS_HEAT_MIN_OUTPUT	5	/* [0 .. 100] */
 #define BUGS_HEAT_MAX_OUTPUT	25	/* [0 .. 100] */
 
 /* The file to send results. Directory must exist. */
@@ -355,23 +355,23 @@ static void getSimulParameters( Parameters_t *const params, int argc,
 				strcpy( params->output_filename, optarg );
 				break;
 			case '?':
-				ccl_if_err_create_goto( *err, HB_ERROR,
+				hb_if_err_create_goto( *err, HB_ERROR,
 					(optopt != ':'
 					&& strchr( matches, optopt ) != NULL),
 					HB_PARAM_ARG_MISSING, error_handler,
 					"Option required argument missing." );
 
-				ccl_if_err_create_goto( *err, HB_ERROR,
+				hb_if_err_create_goto( *err, HB_ERROR,
 					(isprint( optopt )),
 					HB_PARAM_OPTION_UNKNOWN, error_handler,
 					"Unknown option." );
 
-				ccl_if_err_create_goto( *err, HB_ERROR,
+				hb_if_err_create_goto( *err, HB_ERROR,
 					CL_TRUE,
 					HB_PARAM_CHAR_UNKNOWN, error_handler,
 					"Unprintable character in command line." );
 			default:
-				ccl_if_err_create_goto( *err, HB_ERROR,
+				hb_if_err_create_goto( *err, HB_ERROR,
 					CL_TRUE,
 					HB_PARAM_PARSING, error_handler,
 					"Weird error occurred while parsing parameter." );
@@ -387,37 +387,37 @@ static void getSimulParameters( Parameters_t *const params, int argc,
 	params->world_size = params->world_height * params->world_width;
 
 	/* Check for bug's number related errors. */
-	ccl_if_err_create_goto( *err, HB_ERROR,
+	hb_if_err_create_goto( *err, HB_ERROR,
 		params->bugs_number == 0,
 		HB_BUGS_ZERO, error_handler,
 		"There are no bugs." );
 
-	ccl_if_err_create_goto( *err, HB_ERROR,
+	hb_if_err_create_goto( *err, HB_ERROR,
 		params->bugs_number >= params->world_size,
 		HB_BUGS_OVERFLOW, error_handler,
 		"Number of bugs exceed available world slots." );
 
 	/* Check range related erros in bug's ideal temperature. */
 	/* Checking order matters!                               */
-	ccl_if_err_create_goto( *err, HB_ERROR,
+	hb_if_err_create_goto( *err, HB_ERROR,
 		params->bugs_temperature_min_ideal >
 					params->bugs_temperature_max_ideal,
 		HB_TEMPERATURE_OVERLAP, error_handler,
 		"Bug's ideal temperature range overlaps." );
 
-	ccl_if_err_create_goto( *err, HB_ERROR,
+	hb_if_err_create_goto( *err, HB_ERROR,
 		params->bugs_temperature_max_ideal >= 200,
 		HB_TEMPERATURE_OUT_RANGE, error_handler,
 		"Bug's max ideal temperature is out of range." );
 
 	/* Check for range related error in bug's output heat. */
 	/* Checking order matters!                             */
-	ccl_if_err_create_goto( *err, HB_ERROR,
+	hb_if_err_create_goto( *err, HB_ERROR,
 		params->bugs_heat_min_output > params->bugs_heat_max_output,
 		HB_OUTPUT_HEAT_OVERLAP, error_handler,
 		"Bug's output heat range overlaps.");
 
-	ccl_if_err_create_goto( *err, HB_ERROR,
+	hb_if_err_create_goto( *err, HB_ERROR,
 		params->bugs_heat_max_output >= 100,
 		HB_OUTPUT_HEAT_OUT_RANGE, error_handler,
 		"Bug's max output heat is out of range." );
@@ -465,7 +465,7 @@ static void getOCLObjects( OCLObjects_t *const oclobj,
 
 	/* Read initial seed from linux /dev/urandom */
 	uranddev = fopen( "/dev/urandom", "r" );
-	ccl_if_err_create_goto( *err, HB_ERROR,
+	hb_if_err_create_goto( *err, HB_ERROR,
 		uranddev == NULL,
 		HB_UNABLE_OPEN_FILE, error_handler,
 		"Could not open urandom device to get seed." );
@@ -479,16 +479,16 @@ static void getOCLObjects( OCLObjects_t *const oclobj,
 	/* Create context wrapper for a GPU device. */
 	/* First found GPU device is used.          */
 	oclobj->ctx = ccl_context_new_gpu( &err_get_oclobj );
-	ccl_if_err_propagate_goto( err, err_get_oclobj, error_handler );
+	hb_if_err_propagate_goto( err, err_get_oclobj, error_handler );
 
 	/* Get the device (index 0) in te context. */
 	oclobj->dev = ccl_context_get_device( oclobj->ctx, 0, &err_get_oclobj );
-	ccl_if_err_propagate_goto( err, err_get_oclobj, error_handler );
+	hb_if_err_propagate_goto( err, err_get_oclobj, error_handler );
 
 	/* Create a command queue. */
 	oclobj->queue = ccl_queue_new( oclobj->ctx, oclobj->dev,
 		CL_QUEUE_PROFILING_ENABLE, &err_get_oclobj );
-	ccl_if_err_propagate_goto( err, err_get_oclobj, error_handler );
+	hb_if_err_propagate_goto( err, err_get_oclobj, error_handler );
 
 
 	/* *** Program creation. *** */
@@ -496,7 +496,7 @@ static void getOCLObjects( OCLObjects_t *const oclobj,
 	/* Create a new program from kernel's source. */
 	oclobj->prg = ccl_program_new_from_source_file( oclobj->ctx,
 		CL_KERNEL_SRC_FILE, &err_get_oclobj );
-	ccl_if_err_propagate_goto( err, err_get_oclobj, error_handler );
+	hb_if_err_propagate_goto( err, err_get_oclobj, error_handler );
 
 	/*
 	 * Get OpenCL build options to be sent as 'defines' to kernel,
@@ -509,7 +509,7 @@ static void getOCLObjects( OCLObjects_t *const oclobj,
 	ccl_kernel_suggest_worksizes( NULL, oclobj->dev, DIMS_1,
 		&params->bugs_number, gws->unhapp_stp1_reduce,
 		lws->unhapp_stp1_reduce, &err_get_oclobj );
-	ccl_if_err_propagate_goto( err, err_get_oclobj, error_handler );
+	hb_if_err_propagate_goto( err, err_get_oclobj, error_handler );
 
 	/*
 	* MIN(...) included by cf4ocl2 from glib/gmacros.h.
@@ -546,7 +546,7 @@ static void getOCLObjects( OCLObjects_t *const oclobj,
 
 	/* Build CL Program. */
 	ccl_program_build( oclobj->prg, cl_compiler_opts, &err_get_oclobj );
-	ccl_if_err_propagate_goto( err, err_get_oclobj, error_handler );
+	hb_if_err_propagate_goto( err, err_get_oclobj, error_handler );
 
 
 error_handler:
@@ -588,7 +588,7 @@ static void setupBuffers( HBHostBuffers_t *const hst_buff,
 
 	/* DEBUG: (to remove) Allocate vector for random seeds in host memory. */
 	hst_buff->rng_state = (cl_uint *) malloc( bufsz->rng_state );
-	ccl_if_err_create_goto( *err, HB_ERROR,
+	hb_if_err_create_goto( *err, HB_ERROR,
 		hst_buff->rng_state == NULL,
 		HB_MALLOC_FAILURE, error_handler,
 		"Unable to allocate host memory for random seeds/states." );
@@ -596,7 +596,7 @@ static void setupBuffers( HBHostBuffers_t *const hst_buff,
 	/* Allocate vector of random seeds in device memory. */
 	dev_buff->rng_state = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE,
 		bufsz->rng_state, NULL, &err_setbuf );
-	ccl_if_err_propagate_goto( err, err_setbuf, error_handler );
+	hb_if_err_propagate_goto( err, err_setbuf, error_handler );
 
 
 	/** SWARM */
@@ -604,14 +604,14 @@ static void setupBuffers( HBHostBuffers_t *const hst_buff,
 	bufsz->swarm = params->bugs_number * sizeof( cl_uint );
 
 	hst_buff->swarm = (cl_uint *) malloc( bufsz->swarm );
-	ccl_if_err_create_goto( *err, HB_ERROR,
+	hb_if_err_create_goto( *err, HB_ERROR,
 		hst_buff->swarm == NULL,
 		HB_MALLOC_FAILURE, error_handler,
-		"Unabble to allocate host memory for swarm 0." );
+		"Unable to allocate host memory for swarm." );
 
 	/* REMOVE:
 	hst_buff->swarm[1] = (cl_uint *) malloc( bufsz->swarm );
-	ccl_if_err_create_goto( *err, HB_ERROR,
+	hb_if_err_create_goto( *err, HB_ERROR,
 		hst_buff->swarm[1] == NULL,
 		HB_MALLOC_FAILURE, error_handler,
 		"Unabble to allocate host memory for swarm 1." );
@@ -619,12 +619,12 @@ static void setupBuffers( HBHostBuffers_t *const hst_buff,
 
 	dev_buff->swarm = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE,
 		bufsz->swarm, NULL, &err_setbuf );
-	ccl_if_err_propagate_goto( err, err_setbuf, error_handler );
+	hb_if_err_propagate_goto( err, err_setbuf, error_handler );
 
 	/* REMOVE:
 	dev_buff->swarm[1] = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE,
 		bufsz->swarm, NULL, &err_setbuf );
-	ccl_if_err_propagate_goto( err, err_setbuf, error_handler );
+	hb_if_err_propagate_goto( err, err_setbuf, error_handler );
 	*/
 
 	/** SWARM MAP */
@@ -633,7 +633,7 @@ static void setupBuffers( HBHostBuffers_t *const hst_buff,
 
 	/* DEBUG: (to remove) Allocate vector for the swarm map in host memory. */
 	hst_buff->swarm_map = (cl_uint *) malloc( bufsz->swarm_map );
-	ccl_if_err_create_goto( *err, HB_ERROR,
+	hb_if_err_create_goto( *err, HB_ERROR,
 		hst_buff->swarm_map == NULL,
 		HB_MALLOC_FAILURE, error_handler,
 		"Unable to allocate host memory for swarm map." );
@@ -641,7 +641,7 @@ static void setupBuffers( HBHostBuffers_t *const hst_buff,
 	/* Allocate vector for the swarm map in device memory. */
 	dev_buff->swarm_map = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE,
 		bufsz->swarm_map, NULL, &err_setbuf );
-	ccl_if_err_propagate_goto( err, err_setbuf, error_handler );
+	hb_if_err_propagate_goto( err, err_setbuf, error_handler );
 
 
 	/** HEAT MAP */
@@ -650,14 +650,14 @@ static void setupBuffers( HBHostBuffers_t *const hst_buff,
 
 	/* DEBUG: (to remove) Allocate temperature vector in host memory. */
 	hst_buff->heat_map[0] = (cl_float *) malloc( bufsz->heat_map );
-	ccl_if_err_create_goto( *err, HB_ERROR,
+	hb_if_err_create_goto( *err, HB_ERROR,
 		hst_buff->heat_map[0] == NULL,
 		HB_MALLOC_FAILURE, error_handler,
 		"Unable to allocate host memory for heat map 1." );
 
 	/* DEBUG: (to remove) Allocate temperature vector in host memory. */
 	hst_buff->heat_map[1] = (cl_float *) malloc( bufsz->heat_map );
-	ccl_if_err_create_goto( *err, HB_ERROR,
+	hb_if_err_create_goto( *err, HB_ERROR,
 		hst_buff->heat_map[1] == NULL,
 		HB_MALLOC_FAILURE, error_handler,
 		"Unable to allocate host memory for heat map 2." );
@@ -666,11 +666,11 @@ static void setupBuffers( HBHostBuffers_t *const hst_buff,
 	/* One vector is used for double buffering.                   */
 	dev_buff->heat_map[0] = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE,
 		bufsz->heat_map, NULL, &err_setbuf );
-	ccl_if_err_propagate_goto( err, err_setbuf, error_handler );
+	hb_if_err_propagate_goto( err, err_setbuf, error_handler );
 
 	dev_buff->heat_map[1] = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE,
 		bufsz->heat_map, NULL, &err_setbuf );
-	ccl_if_err_propagate_goto( err, err_setbuf, error_handler );
+	hb_if_err_propagate_goto( err, err_setbuf, error_handler );
 
 
 	/** UNHAPINESS */
@@ -678,14 +678,14 @@ static void setupBuffers( HBHostBuffers_t *const hst_buff,
 	bufsz->unhappiness = params->bugs_number * sizeof( cl_float );
 
 	hst_buff->unhappiness = (cl_float *) malloc( bufsz->unhappiness );
-	ccl_if_err_create_goto( *err, HB_ERROR,
+	hb_if_err_create_goto( *err, HB_ERROR,
 		hst_buff->unhappiness == NULL,
 		HB_MALLOC_FAILURE, error_handler,
 		"Unable to allocate host memory for bugs unhappiness." );
 
 	dev_buff->unhappiness = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE,
 		bufsz->unhappiness, NULL, &err_setbuf );
-	ccl_if_err_propagate_goto( err, err_setbuf, error_handler );
+	hb_if_err_propagate_goto( err, err_setbuf, error_handler );
 
 
 	/** UNHAPPINESS REDUCED - all group sum to global memory. */
@@ -694,14 +694,14 @@ static void setupBuffers( HBHostBuffers_t *const hst_buff,
 		params->reduce_num_workgroups * sizeof( cl_float );
 
 	hst_buff->unhapp_reduced = ( cl_float *) malloc( bufsz->unhapp_reduced );
-	ccl_if_err_create_goto( *err, HB_ERROR,
+	hb_if_err_create_goto( *err, HB_ERROR,
 		hst_buff->unhapp_reduced == NULL,
 		HB_MALLOC_FAILURE, error_handler,
 		"Unable to allocate host memory for bugs unhappiness reduced." );
 
 	dev_buff->unhapp_reduced = ccl_buffer_new( oclobj->ctx,
 		CL_MEM_READ_WRITE, bufsz->unhapp_reduced, NULL, &err_setbuf );
-	ccl_if_err_propagate_goto( err, err_setbuf, error_handler );
+	hb_if_err_propagate_goto( err, err_setbuf, error_handler );
 
 
 	/** UNHAPPINESS AVERAGE - To get the result. */
@@ -709,14 +709,14 @@ static void setupBuffers( HBHostBuffers_t *const hst_buff,
 	bufsz->unhapp_average = sizeof( cl_float );
 
 	hst_buff->unhapp_average = (cl_float *) malloc( bufsz->unhapp_average );
-	ccl_if_err_create_goto( *err, HB_ERROR,
+	hb_if_err_create_goto( *err, HB_ERROR,
 		hst_buff->unhapp_average == NULL,
 		HB_MALLOC_FAILURE, error_handler,
 		"Unable to allocate host memory for bugs unhappiness average." );
 
 	dev_buff->unhapp_average = ccl_buffer_new( oclobj->ctx,
 		CL_MEM_READ_WRITE, bufsz->unhapp_average, NULL, &err_setbuf );
-	ccl_if_err_propagate_goto( err, err_setbuf, error_handler );
+	hb_if_err_propagate_goto( err, err_setbuf, error_handler );
 
 
 error_handler:
@@ -752,12 +752,12 @@ static void getKernels( HBKernels_t *const krnl,
 
 	krnl->init_random = ccl_kernel_new( oclobj->prg,
 		KRNL_NAME__INIT_RANDOM,	&err_getkernels );
-	ccl_if_err_propagate_goto( err, err_getkernels, error_handler );
+	hb_if_err_propagate_goto( err, err_getkernels, error_handler );
 
 	ccl_kernel_suggest_worksizes( krnl->init_random, oclobj->dev,
 		DIMS_1,	&params->bugs_number,
 		gws->init_random, lws->init_random, &err_getkernels );
-	ccl_if_err_propagate_goto( err, err_getkernels, error_handler );
+	hb_if_err_propagate_goto( err, err_getkernels, error_handler );
 
 	printf( "[ kernel ]: init_random.\n    '-> bugs_num = %zu; gws = %zu; lws = %zu\n", params->bugs_number, gws->init_random[0], lws->init_random[0] );
 
@@ -767,12 +767,12 @@ static void getKernels( HBKernels_t *const krnl,
 
 	krnl->init_maps = ccl_kernel_new( oclobj->prg,
 		KRNL_NAME__INIT_MAPS, &err_getkernels );
-	ccl_if_err_propagate_goto( err, err_getkernels, error_handler );
+	hb_if_err_propagate_goto( err, err_getkernels, error_handler );
 
 	ccl_kernel_suggest_worksizes( krnl->init_maps, oclobj->dev,
 		DIMS_1, &params->world_size,
 		gws->init_maps, lws->init_maps,	&err_getkernels );
-	ccl_if_err_propagate_goto( err, err_getkernels, error_handler );
+	hb_if_err_propagate_goto( err, err_getkernels, error_handler );
 
 	printf( "[ kernel ]: init_maps.\n    '-> world_size = %zu; gws = %zu; lws = %zu\n", params->world_size, gws->init_maps[0], lws->init_maps[0] );
 
@@ -782,13 +782,13 @@ static void getKernels( HBKernels_t *const krnl,
 
 	krnl->init_swarm = ccl_kernel_new( oclobj->prg,
 		KRNL_NAME__INIT_SWARM, &err_getkernels );
-	ccl_if_err_propagate_goto( err, err_getkernels, error_handler );
+	hb_if_err_propagate_goto( err, err_getkernels, error_handler );
 
 	/* Dimensions are relactive to the number of bugs to be dropped in swarm map. */
 	ccl_kernel_suggest_worksizes( krnl->init_swarm, oclobj->dev,
 		DIMS_1,	&params->bugs_number,
 		gws->init_swarm, lws->init_swarm, &err_getkernels );
-	ccl_if_err_propagate_goto( err, err_getkernels, error_handler );
+	hb_if_err_propagate_goto( err, err_getkernels, error_handler );
 
 	printf( "[ kernel ]: init_swarm.\n    '-> bugs_num = %zu; gws = %zu; lws = %zu\n", params->bugs_number, gws->init_swarm[0], lws->init_swarm[0] );
 
@@ -798,12 +798,12 @@ static void getKernels( HBKernels_t *const krnl,
 
 	krnl->bug_step = ccl_kernel_new( oclobj->prg,
 		KRNL_NAME__BUG_STEP, &err_getkernels );
-	ccl_if_err_propagate_goto( err, err_getkernels, error_handler );
+	hb_if_err_propagate_goto( err, err_getkernels, error_handler );
 
 	ccl_kernel_suggest_worksizes( krnl->bug_step, oclobj->dev,
 		DIMS_1,	&params->world_size,
 		gws->bug_step, lws->bug_step, &err_getkernels );
-	ccl_if_err_propagate_goto( err, err_getkernels, error_handler );
+	hb_if_err_propagate_goto( err, err_getkernels, error_handler );
 
 	printf( "[ kernel ]: bug_step.\n    '-> world_size = %zu; gws = %zu; lws = %zu\n", params->world_size, gws->bug_step[0], lws->bug_step[0] );
 
@@ -813,12 +813,12 @@ static void getKernels( HBKernels_t *const krnl,
 
 	krnl->comp_world_heat = ccl_kernel_new( oclobj->prg,
 		KRNL_NAME__COMP_WORLD_HEAT, &err_getkernels );
-	ccl_if_err_propagate_goto( err, err_getkernels, error_handler );
+	hb_if_err_propagate_goto( err, err_getkernels, error_handler );
 
 	ccl_kernel_suggest_worksizes( krnl->comp_world_heat, oclobj->dev,
 		DIMS_2, world_realdims,
 		gws->comp_world_heat, lws->comp_world_heat, &err_getkernels );
-	ccl_if_err_propagate_goto( err, err_getkernels, error_handler );
+	hb_if_err_propagate_goto( err, err_getkernels, error_handler );
 
 	printf( "[ kernel ]: comp_world_heat.\n    '-> world_dims = [%zu, %zu]; gws = [%zu, %zu]; lws = [%zu, %zu]\n", world_realdims[0], world_realdims[1], gws->comp_world_heat[0], gws->comp_world_heat[1], lws->comp_world_heat[0], lws->comp_world_heat[1] );
 
@@ -828,7 +828,7 @@ static void getKernels( HBKernels_t *const krnl,
 
 	krnl->unhapp_stp1_reduce = ccl_kernel_new( oclobj->prg,
 		KRNL_NAME__UNHAPP_S1_REDUCE, &err_getkernels );
-	ccl_if_err_propagate_goto( err, err_getkernels, error_handler );
+	hb_if_err_propagate_goto( err, err_getkernels, error_handler );
 
 	/* gws->unhapp_stp1_reduce and lws->unhapp_stp1_reduce were */
 	/* previously computed in function 'getOCLObjects(...)'     */
@@ -841,7 +841,7 @@ static void getKernels( HBKernels_t *const krnl,
 
 	krnl->unhapp_stp2_average = ccl_kernel_new( oclobj->prg,
 		KRNL_NAME__UNHAPP_S2_AVERAGE, &err_getkernels );
-	ccl_if_err_propagate_goto( err, err_getkernels, error_handler );
+	hb_if_err_propagate_goto( err, err_getkernels, error_handler );
 
 	/* The following values for gws and lws must be the ones that allow  */
 	/* the final reduction. There will be only one workgroup.            */
@@ -944,7 +944,7 @@ static inline void initiate( HBKernels_t *const krnl,
 	printf( "Init random:\n\tgws = %zu; lws = %zu\n", gws->init_random[0], lws->init_random[0] );
 
 	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->init_random, oclobj->queue, DIMS_1, NULL, gws->init_random, lws->init_random, &ewl, &err_init );
-	ccl_if_err_propagate_goto( err, err_init, error_handler );
+	hb_if_err_propagate_goto( err, err_init, error_handler );
 
 	/* Add kernel termination event to the wait list. */
 	ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
@@ -953,7 +953,7 @@ static inline void initiate( HBKernels_t *const krnl,
 	/* Read GPU generated seeds/gen_states, after wait for kernel termination. */
 
 //	evt_rdwr = ccl_buffer_enqueue_read( dev_buff->rng_state, oclobj->queue, NON_BLOCK, 0, bufsz->rng_state, hst_buff->rng_state, &ewl, &err_init );
-//	ccl_if_err_propagate_goto( err, err_init, error_handler );
+//	hb_if_err_propagate_goto( err, err_init, error_handler );
 
 	/* Add read event to the wait list. */
 //	ccl_event_wait_list_add( &ewl, evt_rdwr, NULL );
@@ -961,7 +961,7 @@ static inline void initiate( HBKernels_t *const krnl,
 
 	/* Wait events termination. */
 	ccl_event_wait( &ewl, &err_init );
-	ccl_if_err_propagate_goto( err, err_init, error_handler );
+	hb_if_err_propagate_goto( err, err_init, error_handler );
 
 
 	/* DEBUG: Show GPU generated seeds. */
@@ -977,7 +977,7 @@ static inline void initiate( HBKernels_t *const krnl,
 	printf( "Init maps:\n\tgws = %zu; lws = %zu\n", gws->init_maps[0], lws->init_maps[0] );
 
 	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->init_maps, oclobj->queue, DIMS_1, NULL, gws->init_maps, lws->init_maps, &ewl, &err_init );
-	ccl_if_err_propagate_goto( err, err_init, error_handler );
+	hb_if_err_propagate_goto( err, err_init, error_handler );
 
 	/* Add kernel termination event to the wait list. */
 	ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
@@ -985,13 +985,13 @@ static inline void initiate( HBKernels_t *const krnl,
 
 	/* Wait events termination. */
 	ccl_event_wait( &ewl, &err_init );
-	ccl_if_err_propagate_goto( err, err_init, error_handler );
+	hb_if_err_propagate_goto( err, err_init, error_handler );
 
 
 	/* Read swarm map, after wait for kernel termination. */
 
 //	evt_rdwr = ccl_buffer_enqueue_read( dev_buff->swarm_map, oclobj->queue, NON_BLOCK, 0, bufsz->swarm_map, hst_buff->swarm_map, &ewl, &err_init );
-//	ccl_if_err_propagate_goto( err, err_init, error_handler );
+//	hb_if_err_propagate_goto( err, err_init, error_handler );
 
 //	ccl_event_wait_list_add( &ewl, evt_rdwr, NULL );
 
@@ -999,19 +999,19 @@ static inline void initiate( HBKernels_t *const krnl,
 	/* Read heat map. */
 
 //	evt_rdwr = ccl_buffer_enqueue_read( dev_buff->heat_map[0], oclobj->queue, NON_BLOCK, 0, bufsz->heat_map, hst_buff->heat_map[0], &ewl, &err_init );
-//	ccl_if_err_propagate_goto( err, err_init, error_handler );
+//	hb_if_err_propagate_goto( err, err_init, error_handler );
 
 //	ccl_event_wait_list_add( &ewl, evt_rdwr, NULL );
 
 //	evt_rdwr = ccl_buffer_enqueue_read( dev_buff->heat_map[1], oclobj->queue, NON_BLOCK, 0, bufsz->heat_map, hst_buff->heat_map[1], &ewl, &err_init );
-//	ccl_if_err_propagate_goto( err, err_init, error_handler );
+//	hb_if_err_propagate_goto( err, err_init, error_handler );
 
 //	ccl_event_wait_list_add( &ewl, evt_rdwr, NULL );
 
 
 	/* Wait last event termination. */
 //	ccl_event_wait( &ewl, &err_init );
-//	ccl_if_err_propagate_goto( err, err_init, error_handler );
+//	hb_if_err_propagate_goto( err, err_init, error_handler );
 
 /*
 	printf( "\tTesting result from init maps. If no Err pass!\n\n" );
@@ -1036,7 +1036,7 @@ static inline void initiate( HBKernels_t *const krnl,
 	printf( "Init swarm:\n\tgws = %zu; lws = %zu\n", gws->init_swarm[0], lws->init_swarm[0] );
 
 	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->init_swarm, oclobj->queue, DIMS_1, NULL, gws->init_swarm, lws->init_swarm, &ewl, &err_init );
-	ccl_if_err_propagate_goto( err, err_init, error_handler );
+	hb_if_err_propagate_goto( err, err_init, error_handler );
 
 	/* Add kernel termination event to the wait list. */
 	ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
@@ -1044,32 +1044,32 @@ static inline void initiate( HBKernels_t *const krnl,
 
 	/* Wait events termination. */
 	ccl_event_wait( &ewl, &err_init );
-	ccl_if_err_propagate_goto( err, err_init, error_handler );
+	hb_if_err_propagate_goto( err, err_init, error_handler );
 
 
 	/* Read swarm map, after wait for kernel termination. */
 
 //	evt_rdwr = ccl_buffer_enqueue_read( dev_buff->swarm_map, oclobj->queue, NON_BLOCK, 0, bufsz->swarm_map, hst_buff->swarm_map, &ewl, &err_init );
-//	ccl_if_err_propagate_goto( err, err_init, error_handler );
+//	hb_if_err_propagate_goto( err, err_init, error_handler );
 
 //	ccl_event_wait_list_add( &ewl, evt_rdwr, NULL );
 
 	/* Read swarm. */
 
 //	evt_rdwr = ccl_buffer_enqueue_read( dev_buff->swarm[0], oclobj->queue, NON_BLOCK, 0, bufsz->swarm, hst_buff->swarm[0], &ewl, &err_init );
-//	ccl_if_err_propagate_goto( err, err_init, error_handler );
+//	hb_if_err_propagate_goto( err, err_init, error_handler );
 
 //	ccl_event_wait_list_add( &ewl, evt_rdwr, NULL );
 
 //	evt_rdwr = ccl_buffer_enqueue_read( dev_buff->swarm[1], oclobj->queue, NON_BLOCK, 0, bufsz->swarm, hst_buff->swarm[1], &ewl, &err_init );
-//	ccl_if_err_propagate_goto( err, err_init, error_handler );
+//	hb_if_err_propagate_goto( err, err_init, error_handler );
 
 //	ccl_event_wait_list_add( &ewl, evt_rdwr, NULL );
 
 	/* Read unhappiness. */
 
 //	evt_rdwr = ccl_buffer_enqueue_read( dev_buff->unhappiness, oclobj->queue, NON_BLOCK, 0, bufsz->unhappiness, hst_buff->unhappiness, &ewl, &err_init );
-//	ccl_if_err_propagate_goto( err, err_init, error_handler );
+//	hb_if_err_propagate_goto( err, err_init, error_handler );
 
 //	ccl_event_wait_list_add( &ewl, evt_rdwr, NULL );
 
@@ -1078,7 +1078,7 @@ static inline void initiate( HBKernels_t *const krnl,
 
 	/* Wait last event termination. */
 //	ccl_event_wait( & ewl, &err_init );
-//	ccl_if_err_propagate_goto( err, err_init, error_handler );
+//	hb_if_err_propagate_goto( err, err_init, error_handler );
 
 /*
 	printf( "\nShow results for swarm initiation.\n\n" );
@@ -1138,7 +1138,7 @@ static inline void comp_world_heat( HBKernels_t *const krnl, HBGlobalWorkSizes_t
 
 // DEBUG: Only to test diffusion and evaporation: Send buffer to device.
 //	evt_rdwr = ccl_buffer_enqueue_write( dev_buff->heat_map[0], oclobj->queue, NON_BLOCK, 0, bufsz->heat_map, hst_buff->heat_map[0], &ewl, &err_comp_world_heat );
-//	ccl_if_err_propagate_goto( err, err_comp_world_heat, error_handler );
+//	hb_if_err_propagate_goto( err, err_comp_world_heat, error_handler );
 
 //	ccl_event_wait_list_add( &ewl, evt_rdwr, NULL );
 
@@ -1150,26 +1150,26 @@ static inline void comp_world_heat( HBKernels_t *const krnl, HBGlobalWorkSizes_t
 	ccl_kernel_set_arg( krnl->comp_world_heat, 1, dev_buff->heat_map[1] );
 
 	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->comp_world_heat, oclobj->queue, DIMS_2, NULL, gws->comp_world_heat, lws->comp_world_heat, &ewl, &err_comp_world_heat );
-	ccl_if_err_propagate_goto( err, err_comp_world_heat, error_handler );
+	hb_if_err_propagate_goto( err, err_comp_world_heat, error_handler );
 
 	/* Add kernel termination event to the wait list. */
 	ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
 
 	ccl_event_wait( &ewl, &err_comp_world_heat );
-	ccl_if_err_propagate_goto( err, err_comp_world_heat, error_handler );
+	hb_if_err_propagate_goto( err, err_comp_world_heat, error_handler );
 
 
 	/* DEBUG: check world map. */
 	evt_rdwr = ccl_buffer_enqueue_read( dev_buff->heat_map[0], oclobj->queue, NON_BLOCK, 0, bufsz->heat_map, hst_buff->heat_map[0], &ewl, &err_comp_world_heat );
-	ccl_if_err_propagate_goto( err, err_comp_world_heat, error_handler );
+	hb_if_err_propagate_goto( err, err_comp_world_heat, error_handler );
 
 	evt_rdwr = ccl_buffer_enqueue_read( dev_buff->heat_map[1], oclobj->queue, NON_BLOCK, 0, bufsz->heat_map, hst_buff->heat_map[1], &ewl, &err_comp_world_heat );
-	ccl_if_err_propagate_goto( err, err_comp_world_heat, error_handler );
+	hb_if_err_propagate_goto( err, err_comp_world_heat, error_handler );
 
 	ccl_event_wait_list_add( &ewl, evt_rdwr, NULL );
 
 	ccl_event_wait( &ewl, &err_comp_world_heat );
-	ccl_if_err_propagate_goto( err, err_comp_world_heat, error_handler );
+	hb_if_err_propagate_goto( err, err_comp_world_heat, error_handler );
 
 	/* Show heat map. */
 //	printf( "Computed result for heatmap:\n" );
@@ -1213,7 +1213,7 @@ static inline void simulate( const HBKernels_t *const krnl,
 	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->unhapp_stp1_reduce,
 			oclobj->queue, DIMS_1, NULL, gws->unhapp_stp1_reduce,
 			lws->unhapp_stp1_reduce, &ewl, &err_simul );
-	ccl_if_err_propagate_goto( err, err_simul, error_handler );
+	hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 	/* Add 'kernel termination' event to the wait list. */
 	ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
@@ -1222,7 +1222,7 @@ static inline void simulate( const HBKernels_t *const krnl,
 	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->unhapp_stp2_average,
 			oclobj->queue, DIMS_1, NULL, gws->unhapp_stp2_average,
 			lws->unhapp_stp2_average, &ewl, &err_simul );
-	ccl_if_err_propagate_goto( err, err_simul, error_handler );
+	hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 	/* Add 'kernel termination' event to the wait list. */
 	ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
@@ -1233,7 +1233,7 @@ static inline void simulate( const HBKernels_t *const krnl,
 	evt_rdwr = ccl_buffer_enqueue_read( dev_buff->unhapp_average,
 			oclobj->queue, NON_BLOCK, 0, bufsz->unhapp_average,
 			hst_buff->unhapp_average, &ewl, &err_simul );
-	ccl_if_err_propagate_goto( err, err_simul, error_handler );
+	hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 	/* Add read termination event to the wait list. */
 	ccl_event_wait_list_add( &ewl, evt_rdwr, NULL );
@@ -1241,7 +1241,7 @@ static inline void simulate( const HBKernels_t *const krnl,
 
 	/* Wait for last event completion. */
 	ccl_event_wait( &ewl, &err_simul );
-	ccl_if_err_propagate_goto( err, err_simul, error_handler );
+	hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 
 	iter_counter = 0;
@@ -1275,7 +1275,7 @@ static inline void simulate( const HBKernels_t *const krnl,
 					gws->comp_world_heat,
 					lws->comp_world_heat, &ewl,
 					&err_simul );
-		ccl_if_err_propagate_goto( err, err_simul, error_handler );
+		hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 		/* Add kernel termination event to wait list. */
 		ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
@@ -1293,7 +1293,7 @@ static inline void simulate( const HBKernels_t *const krnl,
 					oclobj->queue, DIMS_1, NULL,
 					gws->bug_step, lws->bug_step, &ewl,
 					&err_simul );
-		ccl_if_err_propagate_goto( err, err_simul, error_handler );
+		hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 		/* Add kernel termination event to wait list. */
 		ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
@@ -1308,7 +1308,7 @@ static inline void simulate( const HBKernels_t *const krnl,
 					gws->unhapp_stp1_reduce,
 					lws->unhapp_stp1_reduce, &ewl,
 					&err_simul );
-			ccl_if_err_propagate_goto( err, err_simul, error_handler );
+			hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 		/* Add 'kernel termination' event to the wait list. */
 		ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
@@ -1320,7 +1320,7 @@ static inline void simulate( const HBKernels_t *const krnl,
 					gws->unhapp_stp2_average,
 					lws->unhapp_stp2_average, &ewl,
 					&err_simul );
-		ccl_if_err_propagate_goto( err, err_simul, error_handler );
+		hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 		/* Add 'kernel termination' event to the wait list. */
 		ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
@@ -1332,14 +1332,14 @@ static inline void simulate( const HBKernels_t *const krnl,
 					bufsz->unhapp_average,
 					hst_buff->unhapp_average, &ewl,
 					&err_simul );
-		ccl_if_err_propagate_goto( err, err_simul, error_handler );
+		hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 		/* Add read termination event to the wait list. */
 		ccl_event_wait_list_add( &ewl, evt_rdwr, NULL );
 
 		/* Wait for read event completion. */
 		ccl_event_wait( &ewl, &err_simul );
-		ccl_if_err_propagate_goto( err, err_simul, error_handler );
+		hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 
 		iter_counter++;
@@ -1394,16 +1394,16 @@ int main ( int argc, char *argv[] )
 
 
 	getSimulParameters( &params, argc, argv, &err_main );
-	ccl_if_err_goto( err_main, error_handler );
+	hb_if_err_goto( err_main, error_handler );
 
 	getOCLObjects( &oclobj, &gws, &lws, &params, &err_main );
-	ccl_if_err_goto( err_main, error_handler );
+	hb_if_err_goto( err_main, error_handler );
 
 	setupBuffers( &hst_buff, &dev_buff, &bufsz, &oclobj, &params, &err_main );
-	ccl_if_err_goto( err_main, error_handler );
+	hb_if_err_goto( err_main, error_handler );
 
 	getKernels( &krnl, &gws, &lws, &oclobj, &params, &err_main );
-	ccl_if_err_goto( err_main, error_handler );
+	hb_if_err_goto( err_main, error_handler );
 
 	/* Set the permanent kernel parameters (i.e. the buffers.). */
 	setKernelParameters( &krnl, &dev_buff, &lws );
@@ -1411,18 +1411,18 @@ int main ( int argc, char *argv[] )
 
 	/* Open output file for results. */
 	hbResultFile = fopen( params.output_filename, "w+" );	/* Overwrite. */
-	ccl_if_err_create_goto( err_main, HB_ERROR,
+	hb_if_err_create_goto( err_main, HB_ERROR,
 		hbResultFile == NULL, HB_UNABLE_OPEN_FILE, error_handler,
 		"Could not open output file." );
 
 
 	/* Run all init kernels. */
 	initiate( &krnl, &gws, &lws, &oclobj, &dev_buff, &hst_buff, &bufsz, &params, &err_main );
-	ccl_if_err_goto( err_main, error_handler );
+	hb_if_err_goto( err_main, error_handler );
 
 
 	simulate( &krnl, &gws, &lws, &oclobj, &dev_buff, &hst_buff, &bufsz, &params, hbResultFile, &err_main );
-	ccl_if_err_goto( err_main, error_handler );
+	hb_if_err_goto( err_main, error_handler );
 
 
 	printf( "End...\n\n" );

@@ -8,7 +8,8 @@
 
 # Variable definitions.
 CC = gcc
-CFLAGS = -Wall -std=c99 -pedantic -g
+CFLAGS = -Wall -std=c99 -g
+# CFLAGS = -Wall -std=c99 -pedantic -g
 RESULTSDIR = ../results
 BUILDDIR = ../bin
 
