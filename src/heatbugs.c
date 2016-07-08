@@ -87,32 +87,35 @@
 
 /** Input data used for simulation. */
 typedef struct parameters {
+	/* IN: The seed to be used. */
+	size_t seed;
+	/* 'reduce_num_workgroups' is used to send information across functions. */
 	size_t reduce_num_workgroups;
-	/* Num Iterations to stop. (0 = non stop). */
+	/* IN: Num Iterations to stop. (0 = non stop). */
 	size_t numIterations;
-	/* Number of bugs in the world. */
+	/* IN: Number of bugs in the world. */
 	size_t bugs_number;
-	/* World width size. */
+	/* IN: World width size. */
 	size_t world_width;
-	/* World height size. */
+	/* IN: World height size. */
 	size_t world_height;
-	/* World's vector size = (world_height * world_width). */
+	/* IN: World's vector size = (world_height * world_width). */
 	size_t world_size;
-	/* [0..1], % temperature to adjacent cells. */
+	/* IN: [0..1], % temperature to adjacent cells. */
 	float world_diffusion_rate;
-	/* [0..1], % temperature's loss to 'ether'.  */
+	/* IN: [0..1], % temperature's loss to 'ether'.  */
 	float world_evaporation_rate;
-	/* [0..100], Chance a bug will move. */
+	/* IN: [0..100], Chance a bug will move. */
 	float bugs_random_move_chance;
-	/* [0 .. 200], bug's minimum prefered temperature. */
+	/* IN: [0 .. 200], bug's minimum prefered temperature. */
 	unsigned int bugs_temperature_min_ideal;
-	/* [0 .. 200], bug's maximum prefered temperature. */
+	/* IN: [0 .. 200], bug's maximum prefered temperature. */
 	unsigned int bugs_temperature_max_ideal;
-	/* [0 .. 100], min heat a bug leave in the world in each step. */
+	/* IN: [0 .. 100], min heat a bug leave in the world in each step. */
 	unsigned int bugs_heat_min_output;
-	/* [0 .. 100], max heat a bug leave in the world in each step. */
+	/* IN: [0 .. 100], max heat a bug leave in the world in each step. */
 	unsigned int bugs_heat_max_output;
-	/* File to send results. */
+	/* IN: File to send results. */
 	char output_filename[256];
 } Parameters_t;
 
@@ -275,13 +278,15 @@ static GQuark hb_error_quark( void ) {
 static void getSimulParameters( Parameters_t *const params, int argc,
 	char *argv[], GError **err )
 {
+	FILE *uranddev = NULL;
+
 	int c;	/* Parsed command line option */
 
 	/* The string 't:T:h:H:r:n:d:e:w:W:i:f:' is the parameter string to   */
 	/* be checked by 'getopt' function.                                   */
 	/* The ':' character means that a value is required after the         */
 	/* parameter selector character (i.e. -t 50  or  -t50).               */
-	const char matches[] = "t:T:h:H:r:n:d:e:w:W:i:f:";
+	const char matches[] = "t:T:h:H:r:n:d:e:w:W:i:s:f:";
 
 
 	 /* Default / hardcoded parameters. */
@@ -299,6 +304,17 @@ static void getSimulParameters( Parameters_t *const params, int argc,
 	params->bugs_heat_max_output = BUGS_HEAT_MAX_OUTPUT;		/* H */
 
 	strcpy( params->output_filename, OUTPUT_FILENAME );		/* f */
+
+
+	/* Read initial seed from linux /dev/urandom */
+	uranddev = fopen( "/dev/urandom", "r" );
+	hb_if_err_create_goto( *err, HB_ERROR,
+		uranddev == NULL,
+		HB_UNABLE_OPEN_FILE, error_handler,
+		"Could not open urandom device to get seed." );
+
+	fread( &params->seed, sizeof( size_t ), 1, uranddev );
+	fclose( uranddev );
 
 
 	/* Parse command line arguments using GNU's getopt function. */
@@ -349,6 +365,10 @@ static void getSimulParameters( Parameters_t *const params, int argc,
 				break;
 			case 'i':
 				params->numIterations =
+					atoi( optarg );
+				break;
+			case 's':
+				params->seed =
 					atoi( optarg );
 				break;
 			case 'f':
@@ -454,24 +474,10 @@ static void getOCLObjects( OCLObjects_t *const oclobj,
 	HBGlobalWorkSizes_t *const gws, HBLocalWorkSizes_t *const lws,
 	Parameters_t *const params, GError **err )
 {
-	cl_uint init_seed;
-
 	char cl_compiler_opts[512];	/* OpenCL built in compiler/builder */
 					/* parameters.                      */
 
-	FILE *uranddev = NULL;
 	GError *err_get_oclobj = NULL;
-
-
-	/* Read initial seed from linux /dev/urandom */
-	uranddev = fopen( "/dev/urandom", "r" );
-	hb_if_err_create_goto( *err, HB_ERROR,
-		uranddev == NULL,
-		HB_UNABLE_OPEN_FILE, error_handler,
-		"Could not open urandom device to get seed." );
-
-	fread( &init_seed, sizeof(cl_uint), 1, uranddev );
-	fclose( uranddev );
 
 
 	/* *** GPU preparation. Initiate OpenCL objects. *** */
@@ -526,7 +532,7 @@ static void getOCLObjects( OCLObjects_t *const oclobj,
 
 
 	sprintf( cl_compiler_opts, cl_compiler_opts_template,
-				init_seed,
+				params->seed,
 				params->reduce_num_workgroups,
 				params->bugs_number,
 				params->world_width,
