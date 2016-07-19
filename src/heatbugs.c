@@ -53,10 +53,10 @@
 					/* to 'ether'.                */
 
 #define BUGS_RAND_MOVE_CHANCE	0.00f	/* [0..100], Chance a bug will move.  */
-#define BUGS_TEMP_MIN_IDEAL	10	/* [0 .. 200] */
-#define BUGS_TEMP_MAX_IDEAL	40	/* [0 .. 200] */
-#define BUGS_HEAT_MIN_OUTPUT	5	/* [0 .. 100] */
-#define BUGS_HEAT_MAX_OUTPUT	25	/* [0 .. 100] */
+#define BUGS_TEMP_MIN_IDEAL	10	/* [0..200] */
+#define BUGS_TEMP_MAX_IDEAL	40	/* [0..200] */
+#define BUGS_HEAT_MIN_OUTPUT	5	/* [0..100] */
+#define BUGS_HEAT_MAX_OUTPUT	25	/* [0..100] */
 
 /* The file to send results. Directory must exist. */
 #define OUTPUT_FILENAME		"../results/heatbugsGPU.csv"
@@ -76,9 +76,9 @@
 
 
 /** OpenCL options. */
-#define DIMS_1		1		/* Dimensions: 1 dimension.     */
-#define DIMS_2		2		/* Dimensions: 2 dimensions.    */
-#define NON_BLOCK	CL_FALSE	/* Non blocked rd/wr operation. */
+#define DIMS_1		 1		/* Dimensions: 1 dimension.     */
+#define DIMS_2		 2		/* Dimensions: 2 dimensions.    */
+#define NON_BLOCK	 CL_FALSE	/* Non blocked rd/wr operation. */
 
 
 #define OKI_DOKI	 0
@@ -275,7 +275,7 @@ static GQuark hb_error_quark( void ) {
  * @param[in]	argv   - Command line arguments.
  * @param[out]	err    - GLib object for error reporting.
  * */
-static void getSimulParameters( Parameters_t *const params, int argc,
+static inline void getSimulParameters( Parameters_t *const params, int argc,
 	char *argv[], GError **err )
 {
 	FILE *uranddev = NULL;
@@ -313,7 +313,7 @@ static void getSimulParameters( Parameters_t *const params, int argc,
 		HB_UNABLE_OPEN_FILE, error_handler,
 		"Could not open urandom device to get seed." );
 
-	fread( &params->seed, sizeof( size_t ), 1, uranddev );
+	fread( &params->seed, sizeof( size_t ), 1, uranddev );		/* s */
 	fclose( uranddev );
 
 
@@ -470,7 +470,7 @@ error_handler:
  *                     program's compiler options.
  * @param[out]	err	- GLib object for error reporting.
  * */
-static void getOCLObjects( OCLObjects_t *const oclobj,
+static inline void getOCLObjects( OCLObjects_t *const oclobj,
 	HBGlobalWorkSizes_t *const gws, HBLocalWorkSizes_t *const lws,
 	Parameters_t *const params, GError **err )
 {
@@ -547,7 +547,7 @@ static void getOCLObjects( OCLObjects_t *const oclobj,
 				params->bugs_heat_max_output );
 
 	/* DEBUG: Show OpenCL build options. */
-	printf("\n\nbuild Options:\n----------------------\n%s\n\n", cl_compiler_opts);
+	hbprintf("\n\nbuild Options:\n----------------------\n%s\n\n", cl_compiler_opts);
 
 
 	/* Build CL Program. */
@@ -580,7 +580,7 @@ error_handler:
  *                       Used to compute buffer sizes.
  * @param[out]	err      - GLib object for error reporting.
  * */
-static void setupBuffers( HBHostBuffers_t *const hst_buff,
+static inline void setupBuffers( HBHostBuffers_t *const hst_buff,
 	HBDeviceBuffers_t *const dev_buff, HBBuffersSize_t *const bufsz,
 	const OCLObjects_t *const oclobj, const Parameters_t *const params,
 	GError **err )
@@ -744,7 +744,7 @@ error_handler:
  * @param[in]	params -
  * @param[out]	err    - GLib object for error reporting.
  * */
-static void getKernels( HBKernels_t *const krnl,
+static inline void getKernels( HBKernels_t *const krnl,
 	HBGlobalWorkSizes_t *const gws, HBLocalWorkSizes_t *const lws,
 	const OCLObjects_t *const oclobj, const Parameters_t *const params,
 	GError **err )
@@ -765,7 +765,7 @@ static void getKernels( HBKernels_t *const krnl,
 		gws->init_random, lws->init_random, &err_getkernels );
 	hb_if_err_propagate_goto( err, err_getkernels, error_handler );
 
-	printf( "[ kernel ]: init_random.\n    '-> bugs_num = %zu; gws = %zu; lws = %zu\n", params->bugs_number, gws->init_random[0], lws->init_random[0] );
+	hbprintf( "[ kernel ]: init_random.\n    '-> bugs_num = %zu; gws = %zu; lws = %zu\n", params->bugs_number, gws->init_random[0], lws->init_random[0] );
 
 
 	/** INIT_MAPS kernel: */
@@ -780,7 +780,7 @@ static void getKernels( HBKernels_t *const krnl,
 		gws->init_maps, lws->init_maps,	&err_getkernels );
 	hb_if_err_propagate_goto( err, err_getkernels, error_handler );
 
-	printf( "[ kernel ]: init_maps.\n    '-> world_size = %zu; gws = %zu; lws = %zu\n", params->world_size, gws->init_maps[0], lws->init_maps[0] );
+	hbprintf( "[ kernel ]: init_maps.\n    '-> world_size = %zu; gws = %zu; lws = %zu\n", params->world_size, gws->init_maps[0], lws->init_maps[0] );
 
 
 	/** SWARM INITIALIZATION kernel: */
@@ -796,7 +796,7 @@ static void getKernels( HBKernels_t *const krnl,
 		gws->init_swarm, lws->init_swarm, &err_getkernels );
 	hb_if_err_propagate_goto( err, err_getkernels, error_handler );
 
-	printf( "[ kernel ]: init_swarm.\n    '-> bugs_num = %zu; gws = %zu; lws = %zu\n", params->bugs_number, gws->init_swarm[0], lws->init_swarm[0] );
+	hbprintf( "[ kernel ]: init_swarm.\n    '-> bugs_num = %zu; gws = %zu; lws = %zu\n", params->bugs_number, gws->init_swarm[0], lws->init_swarm[0] );
 
 
 	/** BUG STEP kernel: */
@@ -811,7 +811,7 @@ static void getKernels( HBKernels_t *const krnl,
 		gws->bug_step, lws->bug_step, &err_getkernels );
 	hb_if_err_propagate_goto( err, err_getkernels, error_handler );
 
-	printf( "[ kernel ]: bug_step.\n    '-> world_size = %zu; gws = %zu; lws = %zu\n", params->world_size, gws->bug_step[0], lws->bug_step[0] );
+	hbprintf( "[ kernel ]: bug_step.\n    '-> world_size = %zu; gws = %zu; lws = %zu\n", params->world_size, gws->bug_step[0], lws->bug_step[0] );
 
 
 	/** WORLD HEAT Computation kernel: */
@@ -826,7 +826,7 @@ static void getKernels( HBKernels_t *const krnl,
 		gws->comp_world_heat, lws->comp_world_heat, &err_getkernels );
 	hb_if_err_propagate_goto( err, err_getkernels, error_handler );
 
-	printf( "[ kernel ]: comp_world_heat.\n    '-> world_dims = [%zu, %zu]; gws = [%zu, %zu]; lws = [%zu, %zu]\n", world_realdims[0], world_realdims[1], gws->comp_world_heat[0], gws->comp_world_heat[1], lws->comp_world_heat[0], lws->comp_world_heat[1] );
+	hbprintf( "[ kernel ]: comp_world_heat.\n    '-> world_dims = [%zu, %zu]; gws = [%zu, %zu]; lws = [%zu, %zu]\n", world_realdims[0], world_realdims[1], gws->comp_world_heat[0], gws->comp_world_heat[1], lws->comp_world_heat[0], lws->comp_world_heat[1] );
 
 
 	/** UNHAPPINESS STEP 1 - REDUCE kernel: */
@@ -839,7 +839,7 @@ static void getKernels( HBKernels_t *const krnl,
 	/* gws->unhapp_stp1_reduce and lws->unhapp_stp1_reduce were */
 	/* previously computed in function 'getOCLObjects(...)'     */
 
-	printf( "[ kernel ]: unhapp_stp1_reduce.\n    '-> bugs_num = %zu; gws = %zu; lws = %zu\n", params->bugs_number, gws->unhapp_stp1_reduce[0], lws->unhapp_stp1_reduce[0] );
+	hbprintf( "[ kernel ]: unhapp_stp1_reduce.\n    '-> bugs_num = %zu; gws = %zu; lws = %zu\n", params->bugs_number, gws->unhapp_stp1_reduce[0], lws->unhapp_stp1_reduce[0] );
 
 
 	/** UNHAPPINESS STEP 2 - AVERAGE kernel: */
@@ -854,10 +854,10 @@ static void getKernels( HBKernels_t *const krnl,
 	gws->unhapp_stp2_average[ 0 ] = lws->unhapp_stp1_reduce[ 0 ];
 	lws->unhapp_stp2_average[ 0 ] = lws->unhapp_stp1_reduce[ 0 ];
 
-	printf( "[ kernel ]: unhapp_stp2_average.\n    '-> gws = %zu; lws = %zu\n", gws->unhapp_stp2_average[0], lws->unhapp_stp2_average[0] );
+	hbprintf( "[ kernel ]: unhapp_stp2_average.\n    '-> gws = %zu; lws = %zu\n", gws->unhapp_stp2_average[0], lws->unhapp_stp2_average[0] );
 
 
-	printf( "\n" );
+	hbprintf( "\n" );
 
 
 error_handler:
@@ -877,7 +877,7 @@ error_handler:
  * @param[in]	lws      - The local Work Size will be used to set
  *                       device's local memory to be passed to kernel.
  * */
-static void setKernelParameters( const HBKernels_t *const krnl,
+static inline void setKernelParameters( const HBKernels_t *const krnl,
 	const HBDeviceBuffers_t *const dev_buff,
 	const HBLocalWorkSizes_t *const lws )
 {
@@ -925,8 +925,8 @@ static void setKernelParameters( const HBKernels_t *const krnl,
 
 
 /**
- *	Run all init kernels.
- *	*/
+ * Run all init kernels.
+ * */
 static inline void initiate( HBKernels_t *const krnl,
 	const HBGlobalWorkSizes_t *const gws,
 	const HBLocalWorkSizes_t *const lws,
@@ -947,7 +947,7 @@ static inline void initiate( HBKernels_t *const krnl,
 
 	/** INIT RANDOM. */
 
-	printf( "Init random:\n\tgws = %zu; lws = %zu\n", gws->init_random[0], lws->init_random[0] );
+	hbprintf( "Init random:\n\tgws = %zu; lws = %zu\n", gws->init_random[0], lws->init_random[0] );
 
 	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->init_random, oclobj->queue, DIMS_1, NULL, gws->init_random, lws->init_random, &ewl, &err_init );
 	hb_if_err_propagate_goto( err, err_init, error_handler );
@@ -972,15 +972,15 @@ static inline void initiate( HBKernels_t *const krnl,
 
 	/* DEBUG: Show GPU generated seeds. */
 //	for (size_t i = 0; i < params->bugs_number; ++i) {
-//		printf( "%u, ", hst_buff->rng_state[i]);
+//		hbprintf( "%u, ", hst_buff->rng_state[i]);
 //	}
-//	printf( "\n\n" );
+//	hbprintf( "\n\n" );
 
 
 
 	/** RESET SWARM_MAP and HEAT_MAP. */
 
-	printf( "Init maps:\n\tgws = %zu; lws = %zu\n", gws->init_maps[0], lws->init_maps[0] );
+	hbprintf( "Init maps:\n\tgws = %zu; lws = %zu\n", gws->init_maps[0], lws->init_maps[0] );
 
 	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->init_maps, oclobj->queue, DIMS_1, NULL, gws->init_maps, lws->init_maps, &ewl, &err_init );
 	hb_if_err_propagate_goto( err, err_init, error_handler );
@@ -1020,18 +1020,18 @@ static inline void initiate( HBKernels_t *const krnl,
 //	hb_if_err_propagate_goto( err, err_init, error_handler );
 
 /*
-	printf( "\tTesting result from init maps. If no Err pass!\n\n" );
+	hbprintf( "\tTesting result from init maps. If no Err pass!\n\n" );
 	for (size_t i = 0; i < params->world_size; ++i) {
 		if (hst_buff->heat_map[0][i] != 0.0f) {
-			printf( "\t\tErr heatmap buf_0 at pos: %zu\n", i );
+			hbprintf( "\t\tErr heatmap buf_0 at pos: %zu\n", i );
 			exit(1);
 		}
 		if (hst_buff->heat_map[1][i] != 0.0f) {
-			printf( "\t\tErr heatmap buf_1 at pos: %zu\n", i );
+			hbprintf( "\t\tErr heatmap buf_1 at pos: %zu\n", i );
 			exit(1);
 		}
 		if (hst_buff->swarm_map[i] != 0) {
-			printf( "\t\tErr swarm_map at pos: %zu\n", i );
+			hbprintf( "\t\tErr swarm_map at pos: %zu\n", i );
 			exit(1);
 		}
 	}
@@ -1039,7 +1039,7 @@ static inline void initiate( HBKernels_t *const krnl,
 
 	/* INIT SWARM Fill the swarm map with bugs, compute unhapinnes. */
 
-	printf( "Init swarm:\n\tgws = %zu; lws = %zu\n", gws->init_swarm[0], lws->init_swarm[0] );
+	hbprintf( "Init swarm:\n\tgws = %zu; lws = %zu\n", gws->init_swarm[0], lws->init_swarm[0] );
 
 	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->init_swarm, oclobj->queue, DIMS_1, NULL, gws->init_swarm, lws->init_swarm, &ewl, &err_init );
 	hb_if_err_propagate_goto( err, err_init, error_handler );
@@ -1087,28 +1087,28 @@ static inline void initiate( HBKernels_t *const krnl,
 //	hb_if_err_propagate_goto( err, err_init, error_handler );
 
 /*
-	printf( "\nShow results for swarm initiation.\n\n" );
+	hbprintf( "\nShow results for swarm initiation.\n\n" );
 	for (size_t i = 0; i < params->world_height; i++ )
 	{
 		for (size_t j = 0; j < params->world_width; j++ )
 		{
-			printf( "%10u\t", hst_buff->swarm_map[ i * params->world_width + j ] );
+			hbprintf( "%10u\t", hst_buff->swarm_map[ i * params->world_width + j ] );
 		}
-		printf( "\n" );
+		hbprintf( "\n" );
 	}
-	printf( "\n" );
+	hbprintf( "\n" );
 */
 
 /*
-	printf( "Show results for swarm and unhappiness.\n\n" );
+	hbprintf( "Show results for swarm and unhappiness.\n\n" );
 	for ( size_t i = 0; i < params->bugs_number; i++ )
 	{
 		size_t lin, col;
 		lin = hst_buff->swarm[0][i] / params->world_width;
 		col = hst_buff->swarm[0][i] % params->world_width;
-		printf( "bug: %4zu  loc: %4u [%zu, %zu] -> intent: %u  unhapp: %f\n", i, hst_buff->swarm[0][i], lin, col, hst_buff->swarm[1][i], hst_buff->unhappiness[i] );
+		hbprintf( "bug: %4zu  loc: %4u [%zu, %zu] -> intent: %u  unhapp: %f\n", i, hst_buff->swarm[0][i], lin, col, hst_buff->swarm[1][i], hst_buff->unhappiness[i] );
 	}
-	printf( "\n" );
+	hbprintf( "\n" );
 */
 
 error_handler:
@@ -1133,7 +1133,7 @@ static inline void comp_world_heat( HBKernels_t *const krnl, HBGlobalWorkSizes_t
 	CCLEventWaitList ewl = NULL;		/* Event Waiting List. A list of OpenCL events for operations to be finished. */
 
 
-	printf( "Compute world heat:\n\tgws = [%zu,%zu]; lws = [%zu,%zu]\n\n", gws->comp_world_heat[0], gws->comp_world_heat[1], lws->comp_world_heat[0], lws->comp_world_heat[1] );
+	hbprintf( "Compute world heat:\n\tgws = [%zu,%zu]; lws = [%zu,%zu]\n\n", gws->comp_world_heat[0], gws->comp_world_heat[1], lws->comp_world_heat[0], lws->comp_world_heat[1] );
 
 
 // DEBUG: Only to test diffusion and evaporation: Init a heat map.
@@ -1178,10 +1178,10 @@ static inline void comp_world_heat( HBKernels_t *const krnl, HBGlobalWorkSizes_t
 	hb_if_err_propagate_goto( err, err_comp_world_heat, error_handler );
 
 	/* Show heat map. */
-//	printf( "Computed result for heatmap:\n" );
+//	hbprintf( "Computed result for heatmap:\n" );
 //	for (cl_uint i = 0; i < params->world_size; ++i) {
-//		if (i % params->world_width == 0 ) printf ("-----------------\n");
-//		printf( "%f -> %f\n", hst_buff->heat_map[0][i], hst_buff->heat_map[1][i] );
+//		if (i % params->world_width == 0 ) hbprintf ("-----------------\n");
+//		hbprintf( "%f -> %f\n", hst_buff->heat_map[0][i], hst_buff->heat_map[1][i] );
 //	}
 
 
@@ -1253,8 +1253,7 @@ static inline void simulate( const HBKernels_t *const krnl,
 	iter_counter = 0;
 
 	/* Output result to file. */
-	fprintf( hbResultFile, "%zu, %.17g\n", iter_counter,
-						*hst_buff->unhapp_average );
+	fprintf( hbResultFile, "%.17g\n", *hst_buff->unhapp_average );
 
 
 	bufsel.main = 0;    /* On first step, main buffer has index 0.      */
@@ -1351,8 +1350,7 @@ static inline void simulate( const HBKernels_t *const krnl,
 		iter_counter++;
 
 		/* Output result to file. */
-		fprintf( hbResultFile, "%zu, %.17g\n", iter_counter,
-						*hst_buff->unhapp_average );
+		fprintf( hbResultFile, "%.17g\n", *hst_buff->unhapp_average );
 
 
 		/* Swap buffer's indices. */
@@ -1431,7 +1429,7 @@ int main ( int argc, char *argv[] )
 	hb_if_err_goto( err_main, error_handler );
 
 
-	printf( "End...\n\n" );
+	hbprintf( "End...\n\n" );
 
 	/* TODO: Profiling. */
 
@@ -1461,7 +1459,6 @@ clean_all:
 	if (hst_buff.heat_map[1])	free( hst_buff.heat_map[1] );
 	if (hst_buff.heat_map[0])	free( hst_buff.heat_map[0] );
 	if (hst_buff.swarm_map)		free( hst_buff.swarm_map );
-	/* RENOVE: if (hst_buff.swarm[1])		free( hst_buff.swarm[1] ); */
 	if (hst_buff.swarm)		free( hst_buff.swarm );
 	if (hst_buff.rng_state)		free( hst_buff.rng_state );
 
@@ -1472,7 +1469,6 @@ clean_all:
 	if (dev_buff.heat_map[1])	ccl_buffer_destroy( dev_buff.heat_map[1] );
 	if (dev_buff.heat_map[0])	ccl_buffer_destroy( dev_buff.heat_map[0] );
 	if (dev_buff.swarm_map)		ccl_buffer_destroy( dev_buff.swarm_map );
-	/* REMOVE: if (dev_buff.swarm[1])		ccl_buffer_destroy( dev_buff.swarm[1] ); */
 	if (dev_buff.swarm)		ccl_buffer_destroy( dev_buff.swarm );
 	if (dev_buff.rng_state)		ccl_buffer_destroy( dev_buff.rng_state );
 

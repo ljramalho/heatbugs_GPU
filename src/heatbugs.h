@@ -20,6 +20,13 @@
 #define __HEATBUGS_GPU_H_
 
 
+#ifdef DEBUG
+#define hbprintf printf
+#else
+#define hbprintf(...)
+#endif
+
+
 #include <sys/types.h>
 
 
@@ -48,6 +55,7 @@
 		#define CCL_STRD G_STRLOC
 	#endif
 #endif
+
 
 
 /* Error handling macros. Included here because it was removed from later cf4ocl2. */
