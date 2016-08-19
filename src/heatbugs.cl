@@ -218,7 +218,7 @@ inline uint best_Free_Neighbour( int todo, __global float *heat_map,
 	/* Compute back the vector positions. Used on both, best */
 	/* location and random location.                         */
 	neighbour[ SW ].s0 = rs * WORLD_WIDTH + cw;  /* SW neighbour position. */
-	neighbour[ S  ].s0 = rs * WORLD_WIDTH + cc;  /* S  neighbour Position. */
+	neighbour[ S  ].s0 = rs * WORLD_WIDTH + cc;  /* S  neighbour position. */
 	neighbour[ SE ].s0 = rs * WORLD_WIDTH + ce;  /* SE neighbour position. */
 	neighbour[ W  ].s0 = rc * WORLD_WIDTH + cw;  /* W  neighbour position. */
 	neighbour[ E  ].s0 = rc * WORLD_WIDTH + ce;  /* E  neighbour position. */
