@@ -540,15 +540,17 @@ __kernel void bug_step(	__global uint *swarm_bugPosition,
 	/* Update bug's unhappiness vector in global memory. */
 	unhappiness[ bug_id ] = bug_unhappiness;
 
-	/* Usually compare equality of floats is absurd. Netlogo wrapps the   */
-	/* code with: if (unhappiness > 0) { do stuff... }                    */
-	/* I decided to unwrap, terminating as soon as possible using         */
-	/* if (bug_unhappiness = 0.0f) {...}  and continue the remaining code */
-	/* as a fall out case for (bug_unhappiness > 0.0f). After all, this   */
-	/* is syntactically equivalent to netlogo version.                    */
+	/*
+	 * Usually compare equality of floats is absurd. Netlogo wrapps the
+	 * code with: if (unhappiness > 0) { do stuff... }
+	 * I decided to unwrap, terminating as soon as possible using
+	 * if (bug_unhappiness == 0.0f) {...}  and continue the remaining code
+	 * as a fall out case for (bug_unhappiness > 0.0f). After all, this
+	 * is semantically equivalent to netlogo version.
+ 	 * */
 	if (bug_unhappiness == 0.0f)
 	{
-		/* Bug hasn't move we don't need to update swarm_bugPosition. */
+		/* Bug hasn't move, we don't need to update swarm_bugPosition. */
 		heat_map[ bug_locus ] += bug_output_heat;
 		return;
 	}
@@ -564,8 +566,8 @@ __kernel void bug_step(	__global uint *swarm_bugPosition,
 		In order to implement netlogo approach, WITHOUT branching in
 		OpenCL kernel, that is (in netlogo order), to compute:
 		1) random-move-chance,
-		2) best-patch for (temp <  ideal-temp) (when bug is in COLD),
-		3) best-patch for (temp >= ideal-temp) (when bug is in HOT),
+		2) best-patch for (temp <  ideal_temp) (when bug is in COLD),
+		3) best-patch for (temp >= ideal_temp) (when bug is in HOT),
 		the OpenCl kernel select(...) function must be used twice.
 
 		A variable is used to hold what to do, (1), (2) or (3). However
@@ -589,10 +591,8 @@ __kernel void bug_step(	__global uint *swarm_bugPosition,
 	/* If bug's current location is already the best one... */
 	if (bug_new_locus == bug_locus)
 	{
+		/* Bug hasn't move, we don't need to update swarm_bugPosition. */
 		heat_map[ bug_locus ] += bug_output_heat;
-
-		/* Bug hasn't move we don't need to update swarm_bugPosition. */
-
 		return;
 	}
 
@@ -618,7 +618,7 @@ __kernel void bug_step(	__global uint *swarm_bugPosition,
 
 	/*
 	   Call best_Free_Neighbour(..) function looking just for ANY FREE
-	   neighbour and drop bug_step if it is impossible to find any.
+	   neighbour or drop bug_step if it is impossible to find any.
 	 * */
 
 	todo = FIND_ANY_FREE;
@@ -628,10 +628,8 @@ __kernel void bug_step(	__global uint *swarm_bugPosition,
 	/* Here, there is NO free neighbour. Bug must stay in same location */
 	if (bug_new_locus == bug_locus)
 	{
-		heat_map[ bug_locus ] += bug_output_heat;
-
 		/* Bug hasn't move we don't need to update swarm_bugPosition. */
-
+		heat_map[ bug_locus ] += bug_output_heat;
 		return;
 	}
 

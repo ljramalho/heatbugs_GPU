@@ -921,9 +921,6 @@ static inline void setKernelParameters( const HBKernels_t *const krnl,
 
 
 
-
-
-
 /**
  * Run all init kernels.
  * */
@@ -1193,7 +1190,6 @@ error_handler:
 
 
 
-
 static inline void simulate( const HBKernels_t *const krnl,
 	const HBGlobalWorkSizes_t *const gws,
 	const HBLocalWorkSizes_t *const lws,
@@ -1258,6 +1254,7 @@ static inline void simulate( const HBKernels_t *const krnl,
 
 	bufsel.main = 0;    /* On first step, main buffer has index 0.      */
 	bufsel.secd = 1;    /* On first step, secondary buffer has index 1. */
+
 
 	/*******************************/
 	/**      SIMULATION LOOP      **/
