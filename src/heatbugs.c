@@ -174,12 +174,12 @@ typedef struct hb_local_work_sizes	{
 
 /** Host Buffers. */
 typedef struct hb_host_buffers {
-	cl_uint *rng_state;		/* SIZE: BUGS_NUM	- Random seeds buffer. DEBUG: (to remove). */
-	cl_uint *swarm;			/* SIZE: BUGS_NUM	- Bug's position in the swarm_map, (swarm_bugPosition). */
-	cl_uint *swarm_map;		/* SIZE: WORLD_SIZE	- Bugs map. Each cell is: 'ideal-Temperature':8bit 'bug':1bit 'output_heat':7bit. */
-	cl_float *heat_map[2];		/* SIZE: WORLD_SIZE	- Temperature map (heat_map) & the buffer (heat_buffer). DEBUG: (to remove). */
-	cl_float *unhappiness;		/* SIZE: NUM_BUGS	- The Unhappiness vector. */
-	cl_float *unhapp_reduced;	/* SIZE: REDUCE_NUM_WORKGROUPS - The number of workgroups performing reduction. */
+//	cl_uint *rng_state;		/* SIZE: BUGS_NUM	- Random seeds buffer. DEBUG: (to remove). */
+//	cl_uint *swarm;			/* SIZE: BUGS_NUM	- Bug's position in the swarm_map, (swarm_bugPosition). */
+//	cl_uint *swarm_map;		/* SIZE: WORLD_SIZE	- Bugs map. Each cell is: 'ideal-Temperature':8bit 'bug':1bit 'output_heat':7bit. */
+//	cl_float *heat_map[2];		/* SIZE: WORLD_SIZE	- Temperature map (heat_map) & the buffer (heat_buffer). DEBUG: (to remove). */
+//	cl_float *unhappiness;		/* SIZE: NUM_BUGS	- The Unhappiness vector. */
+//	cl_float *unhapp_reduced;	/* SIZE: REDUCE_NUM_WORKGROUPS - The number of workgroups performing reduction. */
 	cl_float *unhapp_average;	/* SIZE: 1		- Unhappiness average. The expected result at the end of each iteration. */
 } HBHostBuffers_t;
 
@@ -593,11 +593,13 @@ static inline void setupBuffers( HBHostBuffers_t *const hst_buff,
 	bufsz->rng_state = params->bugs_number * sizeof( cl_uint );
 
 	/* DEBUG: (to remove) Allocate vector for random seeds in host memory. */
+/*
 	hst_buff->rng_state = (cl_uint *) malloc( bufsz->rng_state );
 	hb_if_err_create_goto( *err, HB_ERROR,
 		hst_buff->rng_state == NULL,
 		HB_MALLOC_FAILURE, error_handler,
 		"Unable to allocate host memory for random seeds/states." );
+*/
 
 	/* Allocate vector of random seeds in device memory. */
 	dev_buff->rng_state = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE,
@@ -609,40 +611,31 @@ static inline void setupBuffers( HBHostBuffers_t *const hst_buff,
 
 	bufsz->swarm = params->bugs_number * sizeof( cl_uint );
 
+/*
 	hst_buff->swarm = (cl_uint *) malloc( bufsz->swarm );
 	hb_if_err_create_goto( *err, HB_ERROR,
 		hst_buff->swarm == NULL,
 		HB_MALLOC_FAILURE, error_handler,
 		"Unable to allocate host memory for swarm." );
-
-	/* REMOVE:
-	hst_buff->swarm[1] = (cl_uint *) malloc( bufsz->swarm );
-	hb_if_err_create_goto( *err, HB_ERROR,
-		hst_buff->swarm[1] == NULL,
-		HB_MALLOC_FAILURE, error_handler,
-		"Unabble to allocate host memory for swarm 1." );
-	*/
+*/
 
 	dev_buff->swarm = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE,
 		bufsz->swarm, NULL, &err_setbuf );
 	hb_if_err_propagate_goto( err, err_setbuf, error_handler );
 
-	/* REMOVE:
-	dev_buff->swarm[1] = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE,
-		bufsz->swarm, NULL, &err_setbuf );
-	hb_if_err_propagate_goto( err, err_setbuf, error_handler );
-	*/
 
 	/** SWARM MAP */
 
 	bufsz->swarm_map = params->world_size * sizeof( cl_uint );
 
 	/* DEBUG: (to remove) Allocate vector for the swarm map in host memory. */
+/*
 	hst_buff->swarm_map = (cl_uint *) malloc( bufsz->swarm_map );
 	hb_if_err_create_goto( *err, HB_ERROR,
 		hst_buff->swarm_map == NULL,
 		HB_MALLOC_FAILURE, error_handler,
 		"Unable to allocate host memory for swarm map." );
+*/
 
 	/* Allocate vector for the swarm map in device memory. */
 	dev_buff->swarm_map = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE,
@@ -655,18 +648,22 @@ static inline void setupBuffers( HBHostBuffers_t *const hst_buff,
 	bufsz->heat_map = params->world_size * sizeof( cl_float );
 
 	/* DEBUG: (to remove) Allocate temperature vector in host memory. */
+/*
 	hst_buff->heat_map[0] = (cl_float *) malloc( bufsz->heat_map );
 	hb_if_err_create_goto( *err, HB_ERROR,
 		hst_buff->heat_map[0] == NULL,
 		HB_MALLOC_FAILURE, error_handler,
 		"Unable to allocate host memory for heat map 1." );
+*/
 
 	/* DEBUG: (to remove) Allocate temperature vector in host memory. */
+/*
 	hst_buff->heat_map[1] = (cl_float *) malloc( bufsz->heat_map );
 	hb_if_err_create_goto( *err, HB_ERROR,
 		hst_buff->heat_map[1] == NULL,
 		HB_MALLOC_FAILURE, error_handler,
 		"Unable to allocate host memory for heat map 2." );
+*/
 
 	/* Allocate two vectors of temperature maps in device memory. */
 	/* One vector is used for double buffering.                   */
@@ -683,11 +680,13 @@ static inline void setupBuffers( HBHostBuffers_t *const hst_buff,
 
 	bufsz->unhappiness = params->bugs_number * sizeof( cl_float );
 
+/*
 	hst_buff->unhappiness = (cl_float *) malloc( bufsz->unhappiness );
 	hb_if_err_create_goto( *err, HB_ERROR,
 		hst_buff->unhappiness == NULL,
 		HB_MALLOC_FAILURE, error_handler,
 		"Unable to allocate host memory for bugs unhappiness." );
+*/
 
 	dev_buff->unhappiness = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE,
 		bufsz->unhappiness, NULL, &err_setbuf );
@@ -699,11 +698,13 @@ static inline void setupBuffers( HBHostBuffers_t *const hst_buff,
 	bufsz->unhapp_reduced =
 		params->reduce_num_workgroups * sizeof( cl_float );
 
+/*
 	hst_buff->unhapp_reduced = ( cl_float *) malloc( bufsz->unhapp_reduced );
 	hb_if_err_create_goto( *err, HB_ERROR,
 		hst_buff->unhapp_reduced == NULL,
 		HB_MALLOC_FAILURE, error_handler,
 		"Unable to allocate host memory for bugs unhappiness reduced." );
+*/
 
 	dev_buff->unhapp_reduced = ccl_buffer_new( oclobj->ctx,
 		CL_MEM_READ_WRITE, bufsz->unhapp_reduced, NULL, &err_setbuf );
@@ -898,7 +899,7 @@ static inline void setKernelParameters( const HBKernels_t *const krnl,
 	/* 'bug_step' kernel arguments. */
 	ccl_kernel_set_arg( krnl->bug_step, 0, dev_buff->swarm );
 	ccl_kernel_set_arg( krnl->bug_step, 1, dev_buff->swarm_map );
-	/* REMOVE: ccl_kernel_set_arg( krnl->bug_step, 2, dev_buff->heat_map[0] ); */
+	/* ccl_kernel_set_arg( krnl->bug_step, 2, dev_buff->heat_map[0] ); */
 	ccl_kernel_set_arg( krnl->bug_step, 3, dev_buff->unhappiness );
 	ccl_kernel_set_arg( krnl->bug_step, 4, dev_buff->rng_state );
 
@@ -934,7 +935,6 @@ static inline void initiate( HBKernels_t *const krnl,
 	GError *err_init = NULL;
 
 	/** Events. */
-//	CCLEvent *evt_rdwr = NULL;			/* Event termination signal for reads and writes. */
 	CCLEvent *evt_krnl_exec = NULL;  /* Event termination signal for  */
 	                                 /* kernel execution. */
 	CCLEventWaitList ewl = NULL;     /* Event Waiting List. A list of */
@@ -1125,7 +1125,7 @@ static inline void comp_world_heat( HBKernels_t *const krnl, HBGlobalWorkSizes_t
 	GError *err_comp_world_heat = NULL;
 
 	/* Events. */
-	CCLEvent *evt_rdwr = NULL;			/* Event termination signal for reads and writes. */
+	/* CCLEvent *evt_rdwr = NULL; */		/* Event termination signal for reads and writes. */
 	CCLEvent *evt_krnl_exec = NULL;		/* Event termination signal for kernel execution. */
 	CCLEventWaitList ewl = NULL;		/* Event Waiting List. A list of OpenCL events for operations to be finished. */
 
@@ -1163,6 +1163,7 @@ static inline void comp_world_heat( HBKernels_t *const krnl, HBGlobalWorkSizes_t
 
 
 	/* DEBUG: check world map. */
+/*
 	evt_rdwr = ccl_buffer_enqueue_read( dev_buff->heat_map[0], oclobj->queue, NON_BLOCK, 0, bufsz->heat_map, hst_buff->heat_map[0], &ewl, &err_comp_world_heat );
 	hb_if_err_propagate_goto( err, err_comp_world_heat, error_handler );
 
@@ -1173,6 +1174,7 @@ static inline void comp_world_heat( HBKernels_t *const krnl, HBGlobalWorkSizes_t
 
 	ccl_event_wait( &ewl, &err_comp_world_heat );
 	hb_if_err_propagate_goto( err, err_comp_world_heat, error_handler );
+*/
 
 	/* Show heat map. */
 //	hbprintf( "Computed result for heatmap:\n" );
@@ -1386,7 +1388,7 @@ int main ( int argc, char *argv[] )
 	HBLocalWorkSizes_t  lws = { {0}, {0}, {0}, {0}, {0, 0}, {0}, {0} };
 
 	/** Buffers for the host. */
-	HBHostBuffers_t hst_buff = { NULL, NULL, NULL, { NULL, NULL }, NULL, NULL, NULL };
+	HBHostBuffers_t hst_buff = { /*NULL, NULL, NULL, { NULL, NULL }, NULL, NULL,*/ NULL };
 	/** Buffers for the device. */
 	HBDeviceBuffers_t dev_buff = { NULL, NULL, NULL, { NULL, NULL }, NULL, NULL, NULL };
 	/** Buffers sizes. */
@@ -1451,13 +1453,13 @@ clean_all:
 
 	/* Destroy host buffers. */
 	if (hst_buff.unhapp_average)	free( hst_buff.unhapp_average );
-	if (hst_buff.unhapp_reduced)	free( hst_buff.unhapp_reduced );
-	if (hst_buff.unhappiness)	free( hst_buff.unhappiness );
-	if (hst_buff.heat_map[1])	free( hst_buff.heat_map[1] );
-	if (hst_buff.heat_map[0])	free( hst_buff.heat_map[0] );
-	if (hst_buff.swarm_map)		free( hst_buff.swarm_map );
-	if (hst_buff.swarm)		free( hst_buff.swarm );
-	if (hst_buff.rng_state)		free( hst_buff.rng_state );
+	/* if (hst_buff.unhapp_reduced)	free( hst_buff.unhapp_reduced ); */
+	/* if (hst_buff.unhappiness)	free( hst_buff.unhappiness ); */
+	/* if (hst_buff.heat_map[1])	free( hst_buff.heat_map[1] ); */
+	/* if (hst_buff.heat_map[0])	free( hst_buff.heat_map[0] ); */
+	/* if (hst_buff.swarm_map)		free( hst_buff.swarm_map ); */
+	/* if (hst_buff.swarm)		free( hst_buff.swarm ); */
+	/* if (hst_buff.rng_state)		free( hst_buff.rng_state ); */
 
 	/* Destroy Device buffers. */
 	if (dev_buff.unhapp_average)	ccl_buffer_destroy( dev_buff.unhapp_average );

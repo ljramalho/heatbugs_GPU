@@ -4,11 +4,13 @@
 #SRCDIRS = ${CURDIR}/src
 
 # -lm : Link with math library-
+# -g  : Default debug information
 
 
 # Variable definitions.
 CC = gcc
-CFLAGS = -Wall -std=c99 -g
+#CFLAGS = -Wall -std=c99 -g
+CFLAGS = -Wall -std=c99 -O3
 # CFLAGS = -Wall -std=c99 -pedantic -g
 RESULTSDIR = ../results
 BUILDDIR = ../bin
