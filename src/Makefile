@@ -3,8 +3,10 @@
 #export BUILDDIR := ${CURDIR}/build
 #SRCDIRS = ${CURDIR}/src
 
-# -lm : Link with math library-
-# -g  : Default debug information
+# http://www.rapidtables.com/code/linux/gcc/gcc-g.htm
+# -g    : No debug info.
+# -lm   : Link with math library.
+# -ansi : the same as -std=c89
 
 
 # Variable definitions.
@@ -12,8 +14,8 @@ CC = gcc
 #CFLAGS = -Wall -std=c99 -g
 CFLAGS = -Wall -std=c99 -O3
 # CFLAGS = -Wall -std=c99 -pedantic -g
-RESULTSDIR = ../results
 BUILDDIR = ../bin
+RESULTSDIR = ../results
 
 
 .PHONY: all
@@ -28,6 +30,7 @@ debug: mkdirs clean compile_debug copy
 
 .PHONY: compile
 compile:  heatbugs.c heatbugs.h
+	@if [ ! -d $(BUILDDIR) ]; then mkdir $(BUILDDIR); fi
 	$(CC) heatbugs.c heatbugs.h $(CFLAGS) `pkg-config --cflags --libs cf4ocl2 glib-2.0` -lOpenCL -o $(BUILDDIR)/heatbugs
 
 
@@ -39,10 +42,10 @@ compile_debug: heatbugs.c heatbugs.h
 
 .PHONY: mkdirs
 mkdirs:
-	@if [ ! -d $(BUILDDIR) ]; then mkdir -p $(BUILDDIR); fi
-	@if [ ! -d $(RESULTSDIR) ]; then mkdir -p $(RESULTSDIR); fi
-#	mkdir -p $(OBJDIR)
-#	mkdir -p $(BUILDDIR)
+#	@if [ ! -d $(BUILDDIR) ]; then mkdir -p $(BUILDDIR); fi
+#	@if [ ! -d $(RESULTSDIR) ]; then mkdir -p $(RESULTSDIR); fi
+	mkdir -p $(BUILDDIR)
+	mkdir -p $(RESULTSDIR)
 
 
 .PHONY: copy

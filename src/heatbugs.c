@@ -217,8 +217,7 @@ typedef struct hb_buffer_select {
 
 
 
-const char version[] =
-	"Heatbugs simulation for GPU (parallel processing) v2.6.";
+const char version[] = "Heatbugs simulation for GPU (parallel processing) v2.6.";
 
 
 
@@ -1439,7 +1438,7 @@ int main ( int argc, char *argv[] )
 error_handler:
 
 	/* Handle error. */
-	fprintf( stderr, "Error: %s\n", err_main->message );
+	fprintf( stderr, "Error: %s\n\n", err_main->message );
 	g_error_free( err_main );
 
 
