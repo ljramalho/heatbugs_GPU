@@ -174,8 +174,9 @@ typedef struct hb_local_work_sizes	{
 
 /** Host Buffers. */
 typedef struct hb_host_buffers {
+	cl_uint *step_retry_flag;	/* SIZE: 1		- In any iteration if set, it flags for another recall of the bug_step kernel. */
 //	cl_uint *rng_state;		/* SIZE: BUGS_NUM	- Random seeds buffer. DEBUG: (to remove). */
-//	cl_uint *swarm;			/* SIZE: BUGS_NUM	- Bug's position in the swarm_map, (swarm_bugPosition). */
+//	cl_uint *swarm_bugPosition;	/* SIZE: BUGS_NUM	- Bug's position in the swarm_map, (swarm_bugPosition). */
 //	cl_uint *swarm_map;		/* SIZE: WORLD_SIZE	- Bugs map. Each cell is: 'ideal-Temperature':8bit 'bug':1bit 'output_heat':7bit. */
 //	cl_float *heat_map[2];		/* SIZE: WORLD_SIZE	- Temperature map (heat_map) & the buffer (heat_buffer). DEBUG: (to remove). */
 //	cl_float *unhappiness;		/* SIZE: NUM_BUGS	- The Unhappiness vector. */
@@ -186,8 +187,9 @@ typedef struct hb_host_buffers {
 
 /** Device buffers. */
 typedef struct hb_device_buffers {
+	CCLBuffer *step_retry_flag;	/* SIZE: 1		- In any iteration if set, it flags for another recall of the bug_step kernel. */
 	CCLBuffer *rng_state;		/* SIZE: BUGS_NUM	- Random seeds buffer. */
-	CCLBuffer *swarm;		/* SIZE: BUGS_NUM	- Bug's position in the swarm_map, (swarm_bugPosition). */
+	CCLBuffer *swarm_bugPosition;	/* SIZE: BUGS_NUM	- Bug's position in the swarm_map, (swarm_bugPosition). */
 	CCLBuffer *swarm_map;		/* SIZE: WORLD_SIZE	- Bugs map. Each cell is: 'ideal-Temperature':8bit 'bug':1bit 'output_heat':7bit. */
 	CCLBuffer *heat_map[2];		/* SIZE: WORLD_SIZE	- Temperature map (heat_map) & the buffer (heat_buffer). */
 	CCLBuffer *unhappiness;		/* SIZE: NUM_BUGS	- The Unhappiness vector. */
@@ -198,8 +200,9 @@ typedef struct hb_device_buffers {
 
 /** Buffers sizes. Sizes are common to host and device buffers. */
 typedef struct hb_buffers_size {
+	size_t step_retry_flag;		/* VAL: 1 * sizeof( cl_uint ) */
 	size_t rng_state;		/* VAL: BUGS_NUM * sizeof( cl_uint ) */
-	size_t swarm;			/* VAL: BUGS_NUM * sizeof( cl_uint ) */
+	size_t swarm_bugPosition;	/* VAL: BUGS_NUM * sizeof( cl_uint ) */
 	size_t swarm_map;		/* VAL: WORLD_SIZE * sizeof( cl_uint ) */
 	size_t heat_map;		/* VAL: WORLD_SIZE * sizeof( cl_float ) */
 	size_t unhappiness;		/* VAL: BUGS_NUM * sizeof( cl_float ) */
@@ -461,12 +464,10 @@ error_handler:
  *	- Create a command queue.
  *	- Create and build a program for devices in the context (GPU).
  *
- * @param[out]	oclobj	- A structure holding the pointers for each
- *                     OpenCL object.
+ * @param[out]	oclobj	- A structure holding the pointers for each OpenCL object.
  * @param[out]	gws	- Structure with global work sizes.
  * @param[out]	lws	- Structure with local work sizes.
- * @param[in]	params	- The simulation parameters. Used to create the
- *                     program's compiler options.
+ * @param[in]	params	- The simulation parameters. Used to create the program's compiler options.
  * @param[out]	err	- GLib object for error reporting.
  * */
 static inline void getOCLObjects( OCLObjects_t *const oclobj,
@@ -482,7 +483,7 @@ static inline void getOCLObjects( OCLObjects_t *const oclobj,
 	/* *** GPU preparation. Initiate OpenCL objects. *** */
 
 	/* Create context wrapper for a GPU device. */
-	/* First found GPU device is used.          */
+	/* First found GPU device will be used.          */
 	oclobj->ctx = ccl_context_new_gpu( &err_get_oclobj );
 	hb_if_err_propagate_goto( err, err_get_oclobj, error_handler );
 
@@ -510,7 +511,10 @@ static inline void getOCLObjects( OCLObjects_t *const oclobj,
 	 * garanted in 'cl_compiler_opts'.
 	 */
 
-	/* Query device for importante parameters before program's build. */
+	/*
+	 * Query device for importante parameters before program's build, so
+	 * those parameters can be send to the kernel as external defines.
+	*/
 	ccl_kernel_suggest_worksizes( NULL, oclobj->dev, DIMS_1,
 		&params->bugs_number, gws->unhapp_stp1_reduce,
 		lws->unhapp_stp1_reduce, &err_get_oclobj );
@@ -565,19 +569,22 @@ error_handler:
 /**
  * Create all the buffers for both, host and device.
  *
- * @param[out]	hst_buff - The structure with all host buffers to be
- *                       filled.
- * @param[out]	dev_buff - The structure with all cf4ocl2 wrapper for
- *                       device buffers to be filled.
- * @param[out]	bufsz    - The structure with all the buffer sizes to be
- *                       computed from 'params'. Sizes are common to
- *                       host and device buffers.
- * @param[in]	oclObj   - The structure to the previously created
- *                       OpenCl objects. From this we need the
- *                       'context' in which to create the buffers.
- * @param[in]	params   - The structure with all simulation parameters.
- *                       Used to compute buffer sizes.
+ * @param[out]	hst_buff - The structure with all host buffers to be filled.
+ * @param[out]	dev_buff - The structure with all cf4ocl2 wrapper for device buffers to be filled.
+ * @param[out]	bufsz    - The structure with all the buffer sizes to be computed from 'params'. Sizes are common to
+ *                         host and device buffers.
+ * @param[in]	oclObj   - The structure to the previously created OpenCl objects. From this we need the
+ *                         'context' in which to create the buffers.
+ * @param[in]	params   - The structure with all simulation parameters. Used to compute buffer sizes.
  * @param[out]	err      - GLib object for error reporting.
+ *
+ * Remember:
+ *      CL_MEM_READ_WRITE     - This flag specifies that the memory object will be read and written by a kernel.
+ *                              This is the default.
+ *      CL_MEM_WRITE_ONLY     - This flags specifies that the memory object will be written but not read by a kernel.
+ *                              Reading from a buffer or image object created with CL_MEM_WRITE_ONLY inside a kernel is undefined.
+ *      CL_MEM_ALLOC_HOST_PTR - This flag specifies that the application wants the OpenCL implementation to allocate
+ *                              memory from host accessible memory.
  * */
 static inline void setupBuffers( HBHostBuffers_t *const hst_buff,
 	HBDeviceBuffers_t *const dev_buff, HBBuffersSize_t *const bufsz,
@@ -585,6 +592,15 @@ static inline void setupBuffers( HBHostBuffers_t *const hst_buff,
 	GError **err )
 {
 	GError *err_setbuf = NULL;
+
+
+	/** STEP_RETRY_FLAG */
+	bufsz->step_retry_flag = sizeof( cl_uint );
+
+	/* Allocate flag into device's memory. */
+	dev_buff->step_retry_flag = ccl_buffer_new( oclobj->ctx, CL_MEM_WRITE_ONLY | CL_MEM_ALLOC_HOST_PTR,
+		bufsz->step_retry_flag, NULL, &err_setbuf );
+	hb_if_err_propagate_goto( err, err_setbuf, error_handler );
 
 
 	/** RANDOM SEEDS */
@@ -608,18 +624,18 @@ static inline void setupBuffers( HBHostBuffers_t *const hst_buff,
 
 	/** SWARM */
 
-	bufsz->swarm = params->bugs_number * sizeof( cl_uint );
+	bufsz->swarm_bugPosition = params->bugs_number * sizeof( cl_uint );
 
 /*
-	hst_buff->swarm = (cl_uint *) malloc( bufsz->swarm );
+	hst_buff->swarm_bugPosition = (cl_uint *) malloc( bufsz->swarm_bugPosition );
 	hb_if_err_create_goto( *err, HB_ERROR,
-		hst_buff->swarm == NULL,
+		hst_buff->swarm_bugPosition == NULL,
 		HB_MALLOC_FAILURE, error_handler,
-		"Unable to allocate host memory for swarm." );
+		"Unable to allocate host memory for swarm bug position." );
 */
 
-	dev_buff->swarm = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE,
-		bufsz->swarm, NULL, &err_setbuf );
+	dev_buff->swarm_bugPosition = ccl_buffer_new( oclobj->ctx, CL_MEM_READ_WRITE,
+		bufsz->swarm_bugPosition, NULL, &err_setbuf );
 	hb_if_err_propagate_goto( err, err_setbuf, error_handler );
 
 
@@ -890,13 +906,13 @@ static inline void setKernelParameters( const HBKernels_t *const krnl,
 	ccl_kernel_set_arg( krnl->init_maps, 2, dev_buff->heat_map[1] );
 
 	/* 'init_swarm' kernel arguments. 'swarm[0]' and 'swarm[1]'      */
-	ccl_kernel_set_arg( krnl->init_swarm, 0, dev_buff->swarm );
+	ccl_kernel_set_arg( krnl->init_swarm, 0, dev_buff->swarm_bugPosition );
 	ccl_kernel_set_arg( krnl->init_swarm, 1, dev_buff->swarm_map );
 	ccl_kernel_set_arg( krnl->init_swarm, 2, dev_buff->unhappiness );
 	ccl_kernel_set_arg( krnl->init_swarm, 3, dev_buff->rng_state );
 
 	/* 'bug_step' kernel arguments. */
-	ccl_kernel_set_arg( krnl->bug_step, 0, dev_buff->swarm );
+	ccl_kernel_set_arg( krnl->bug_step, 0, dev_buff->swarm_bugPosition );
 	ccl_kernel_set_arg( krnl->bug_step, 1, dev_buff->swarm_map );
 	/* ccl_kernel_set_arg( krnl->bug_step, 2, dev_buff->heat_map[0] ); */
 	ccl_kernel_set_arg( krnl->bug_step, 3, dev_buff->unhappiness );
@@ -1387,9 +1403,9 @@ int main ( int argc, char *argv[] )
 	HBLocalWorkSizes_t  lws = { {0}, {0}, {0}, {0}, {0, 0}, {0}, {0} };
 
 	/** Buffers for the host. */
-	HBHostBuffers_t hst_buff = { /*NULL, NULL, NULL, { NULL, NULL }, NULL, NULL,*/ NULL };
+	HBHostBuffers_t hst_buff = { NULL, /*NULL, NULL, NULL, { NULL, NULL }, NULL, NULL,*/ NULL };
 	/** Buffers for the device. */
-	HBDeviceBuffers_t dev_buff = { NULL, NULL, NULL, { NULL, NULL }, NULL, NULL, NULL };
+	HBDeviceBuffers_t dev_buff = { NULL, NULL, NULL, NULL, { NULL, NULL }, NULL, NULL, NULL };
 	/** Buffers sizes. */
 	HBBuffersSize_t bufsz;
 
@@ -1456,9 +1472,10 @@ clean_all:
 	/* if (hst_buff.unhappiness)	free( hst_buff.unhappiness ); */
 	/* if (hst_buff.heat_map[1])	free( hst_buff.heat_map[1] ); */
 	/* if (hst_buff.heat_map[0])	free( hst_buff.heat_map[0] ); */
-	/* if (hst_buff.swarm_map)		free( hst_buff.swarm_map ); */
+	/* if (hst_buff.swarm_map)	free( hst_buff.swarm_map ); */
 	/* if (hst_buff.swarm)		free( hst_buff.swarm ); */
-	/* if (hst_buff.rng_state)		free( hst_buff.rng_state ); */
+	/* if (hst_buff.rng_state)	free( hst_buff.rng_state ); */
+	if (hst_buff.step_retry_flag)	free( hst_buff.step_retry_flag );
 
 	/* Destroy Device buffers. */
 	if (dev_buff.unhapp_average)	ccl_buffer_destroy( dev_buff.unhapp_average );
@@ -1467,8 +1484,9 @@ clean_all:
 	if (dev_buff.heat_map[1])	ccl_buffer_destroy( dev_buff.heat_map[1] );
 	if (dev_buff.heat_map[0])	ccl_buffer_destroy( dev_buff.heat_map[0] );
 	if (dev_buff.swarm_map)		ccl_buffer_destroy( dev_buff.swarm_map );
-	if (dev_buff.swarm)		ccl_buffer_destroy( dev_buff.swarm );
+	if (dev_buff.swarm_bugPosition)	ccl_buffer_destroy( dev_buff.swarm_bugPosition );
 	if (dev_buff.rng_state)		ccl_buffer_destroy( dev_buff.rng_state );
+	if (dev_buff.step_retry_flag)	ccl_buffer_destroy( dev_buff.step_retry_flag );
 
 	/** Destroy kernel wrappers. */
 	if (krnl.unhapp_stp2_average)	ccl_kernel_destroy( krnl.unhapp_stp2_average );
