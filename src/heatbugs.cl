@@ -96,7 +96,7 @@
 #define SET_BUG_OUTPUT_HEAT( uint_reg, value ) uint_reg = (uint_reg & 0xffff00ff) | ((value) << 8)
 
 #define SET_BUG_AT_REST( uint_reg ) uint_reg = (uint_reg & 0xffffff00)
-#define SET_BUG_TO_MOVE( uint_reg ) uint_reg = (uint_reg | 0x000000aa)
+#define SET_BUG_TO_MOVE( uint_reg ) uint_reg = ((uint_reg & 0xffffff00) | 0x000000aa)
 
 
 #define HAS_BUG( uint_reg ) ((uint_reg) != EMPTY_CELL)
@@ -106,6 +106,10 @@
 #define GET_BUG_OUTPUT_HEAT( uint_reg ) ( ((uint_reg) & 0x0000ff00) >> 8 )
 
 #define BUG_HAS_MOVED( uint_reg ) (((uint_reg) & 0x00ff00ff) != BUG)
+
+
+#define RST_BUG_STEP_FLAG	0x00000000
+#define SET_BUG_STEP_FLAG	0xffffffff
 
 
 
@@ -489,6 +493,40 @@ __kernel void init_swarm( __global uint *swarm_bugPosition,
 
 
 /*
+ * Change all bugs to "want to move" state.
+ *
+ * This kernel changes the 8 LSB bits of all bug's representation, (as defined
+ * by the macro 'BUG'), to the hexadecimal value 'aa', meaning the bug wants to
+ * move.
+ * */
+__kernel void set_bug_move_state( __global uint *swarm_bugPosition,
+				  __global uint *swarm_map,
+				  __global uint *bug_step_retry )
+{
+	__private uint bug;
+	__private uint on_locus;
+
+
+	const uint bug_id = get_global_id( 0 );
+
+	if (bug_id >= BUGS_NUMBER) return;
+
+
+	/* Get a bug location. */
+	bug_locus = swarm_bugPosition[ bug_id ];
+
+	/* Set the bug in the swarm to the 'want to move' state, preparing next iteration. */
+	SET_BUG_TO_MOVE( swarm_map[ bug_locus ] );
+
+	/* Reset bug_step retry flag. */
+	if (bug_id == 0) bug_step_retry[ bug_id ] = RST_BUG_STEP_FLAG;
+
+	return;
+}
+
+
+
+/*
  * Perform a bug movement in the world.
  *
  * Netlogo completely separates the report of the "best" / "random" location,
@@ -519,6 +557,7 @@ __kernel void bug_step(	__global uint *swarm_bugPosition,
 			__global uint *swarm_map,
 			__global float *heat_map,
 			__global float *unhappiness,
+			__global uint *bug_step_retry,
 			__global uint *rng_state )
 {
 	__private uint bug_locus;
@@ -538,15 +577,22 @@ __kernel void bug_step(	__global uint *swarm_bugPosition,
 	if (bug_id >= BUGS_NUMBER) return;
 
 
+	/* Get a bug location. */
 	bug_locus = swarm_bugPosition[ bug_id ];
 
+	/*
+	 * Get a private copy of the bug while keeping the original in the swarm.
+	 *
+	 * Until this bug resolves his movement, the original one (with original
+	 * status) and his position is keept in swarm_map and swarm_bugPosition.
+	 * */
 	bug = swarm_map[ bug_locus ];
 
-	/* Check if bug has already moved in this iteration. Exit if it has moved. */
+	/* Check if bug has already moved in this iteration. If it has moved, then exit. */
 	if (BUG_HAS_MOVED( bug )) return;
 
 
-	/* Here the bug has not yet moved in this iteration. */
+	/** Arriving here means, the bug has not yet moved in this iteration. */
 
 	locus_temperature = heat_map[ bug_locus ];
 
@@ -554,8 +600,7 @@ __kernel void bug_step(	__global uint *swarm_bugPosition,
 	bug_output_heat = GET_BUG_OUTPUT_HEAT( bug );
 
 	/* IDEA: use CL typecast ? */
-	bug_unhappiness =
-		fabs( (float) bug_ideal_temperature - locus_temperature );
+	bug_unhappiness = fabs( (float) bug_ideal_temperature - locus_temperature );
 
 	/* Update bug's unhappiness vector in global memory. */
 	unhappiness[ bug_id ] = bug_unhappiness;
@@ -626,6 +671,7 @@ __kernel void bug_step(	__global uint *swarm_bugPosition,
 		/* SUCCESS! Reset old bug location. */
 		/* Should be atomic in case another work-item try to read. */
 		atomic_xchg( &swarm_map[ bug_locus ], EMPTY_CELL );
+
 		heat_map[ bug_new_locus ] += bug_output_heat;
 
 		/* Update bug location in the swarm. */

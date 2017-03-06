@@ -69,6 +69,7 @@
 #define KRNL_NAME__INIT_RANDOM		"init_random"
 #define KRNL_NAME__INIT_MAPS		"init_maps"
 #define KRNL_NAME__INIT_SWARM		"init_swarm"
+#define KRNL_NAME__SET_BUG_MOVE_STATE	"set_bug_move_state"
 #define KRNL_NAME__BUG_STEP		"bug_step"
 #define KRNL_NAME__COMP_WORLD_HEAT	"comp_world_heat"
 #define KRNL_NAME__UNHAPP_S1_REDUCE	"unhappiness_step1_reduce"
@@ -174,7 +175,7 @@ typedef struct hb_local_work_sizes	{
 
 /** Host Buffers. */
 typedef struct hb_host_buffers {
-	cl_uint *step_retry_flag;	/* SIZE: 1		- In any iteration if set, it flags for another recall of the bug_step kernel. */
+	cl_uint *bug_step_retry;	/* SIZE: 1		- In any iteration if set, it flags for another recall of the bug_step kernel. */
 //	cl_uint *rng_state;		/* SIZE: BUGS_NUM	- Random seeds buffer. DEBUG: (to remove). */
 //	cl_uint *swarm_bugPosition;	/* SIZE: BUGS_NUM	- Bug's position in the swarm_map, (swarm_bugPosition). */
 //	cl_uint *swarm_map;		/* SIZE: WORLD_SIZE	- Bugs map. Each cell is: 'ideal-Temperature':8bit 'bug':1bit 'output_heat':7bit. */
@@ -187,7 +188,7 @@ typedef struct hb_host_buffers {
 
 /** Device buffers. */
 typedef struct hb_device_buffers {
-	CCLBuffer *step_retry_flag;	/* SIZE: 1		- In any iteration if set, it flags for another recall of the bug_step kernel. */
+	CCLBuffer *bug_step_retry;	/* SIZE: 1		- In any iteration if set, it flags for another recall of the bug_step kernel. */
 	CCLBuffer *rng_state;		/* SIZE: BUGS_NUM	- Random seeds buffer. */
 	CCLBuffer *swarm_bugPosition;	/* SIZE: BUGS_NUM	- Bug's position in the swarm_map, (swarm_bugPosition). */
 	CCLBuffer *swarm_map;		/* SIZE: WORLD_SIZE	- Bugs map. Each cell is: 'ideal-Temperature':8bit 'bug':1bit 'output_heat':7bit. */
@@ -200,7 +201,7 @@ typedef struct hb_device_buffers {
 
 /** Buffers sizes. Sizes are common to host and device buffers. */
 typedef struct hb_buffers_size {
-	size_t step_retry_flag;		/* VAL: 1 * sizeof( cl_uint ) */
+	size_t bug_step_retry;		/* VAL: 1 * sizeof( cl_uint ) */
 	size_t rng_state;		/* VAL: BUGS_NUM * sizeof( cl_uint ) */
 	size_t swarm_bugPosition;	/* VAL: BUGS_NUM * sizeof( cl_uint ) */
 	size_t swarm_map;		/* VAL: WORLD_SIZE * sizeof( cl_uint ) */
@@ -595,11 +596,11 @@ static inline void setupBuffers( HBHostBuffers_t *const hst_buff,
 
 
 	/** STEP_RETRY_FLAG */
-	bufsz->step_retry_flag = sizeof( cl_uint );
+	bufsz->bug_step_retry = sizeof( cl_uint );
 
-	/* Allocate flag into device's memory. */
-	dev_buff->step_retry_flag = ccl_buffer_new( oclobj->ctx, CL_MEM_WRITE_ONLY | CL_MEM_ALLOC_HOST_PTR,
-		bufsz->step_retry_flag, NULL, &err_setbuf );
+	/* Allocate step_retry_flag into device's memory. */
+	dev_buff->bug_step_retry = ccl_buffer_new( oclobj->ctx, CL_MEM_WRITE_ONLY | CL_MEM_ALLOC_HOST_PTR,
+		bufsz->bug_step_retry, NULL, &err_setbuf );
 	hb_if_err_propagate_goto( err, err_setbuf, error_handler );
 
 
@@ -897,37 +898,40 @@ static inline void setKernelParameters( const HBKernels_t *const krnl,
 	const HBDeviceBuffers_t *const dev_buff,
 	const HBLocalWorkSizes_t *const lws )
 {
-	/* 'init_random' kernel arguments. */
+	/** 'init_random' kernel arguments. */
 	ccl_kernel_set_arg( krnl->init_random, 0, dev_buff->rng_state );
 
-	/* 'init_maps' kernel arguments. 'heat_map[0]' and 'heat_map[1]' */
+	/** 'init_maps' kernel arguments. 'heat_map[0]' and 'heat_map[1]' */
 	ccl_kernel_set_arg( krnl->init_maps, 0, dev_buff->swarm_map );
 	ccl_kernel_set_arg( krnl->init_maps, 1, dev_buff->heat_map[0] );
 	ccl_kernel_set_arg( krnl->init_maps, 2, dev_buff->heat_map[1] );
 
-	/* 'init_swarm' kernel arguments. 'swarm[0]' and 'swarm[1]'      */
+	/** 'init_swarm' kernel arguments. 'swarm[0]' and 'swarm[1]'      */
 	ccl_kernel_set_arg( krnl->init_swarm, 0, dev_buff->swarm_bugPosition );
 	ccl_kernel_set_arg( krnl->init_swarm, 1, dev_buff->swarm_map );
 	ccl_kernel_set_arg( krnl->init_swarm, 2, dev_buff->unhappiness );
 	ccl_kernel_set_arg( krnl->init_swarm, 3, dev_buff->rng_state );
 
-	/* 'bug_step' kernel arguments. */
+	/** 'bug_step' kernel arguments. */
 	ccl_kernel_set_arg( krnl->bug_step, 0, dev_buff->swarm_bugPosition );
 	ccl_kernel_set_arg( krnl->bug_step, 1, dev_buff->swarm_map );
 	/* ccl_kernel_set_arg( krnl->bug_step, 2, dev_buff->heat_map[0] ); */
 	ccl_kernel_set_arg( krnl->bug_step, 3, dev_buff->unhappiness );
-	ccl_kernel_set_arg( krnl->bug_step, 4, dev_buff->rng_state );
+	ccl_kernel_set_arg( krnl->bug_step, 4, dev_buff->bug_step_retry );
+	ccl_kernel_set_arg( krnl->bug_step, 5, dev_buff->rng_state );
 
-	/* 'comp_world_heat' kernel arguments. */
+	/** 'comp_world_heat' kernel arguments. */
+	/* These arguments change in every iteration. It will be set in 'simulate(..) function. */
+
 	//ccl_kernel_set_arg( krnl->comp_world_heat, 0, dev_buff->heat_map[0] );
 	//ccl_kernel_set_arg( krnl->comp_world_heat, 1, dev_buff->heat_map[1] );
 
-	/* 'unhappiness_stp1_reduce' kernel arguments. */
+	/** 'unhappiness_stp1_reduce' kernel arguments. */
 	ccl_kernel_set_arg( krnl->unhapp_stp1_reduce, 0, dev_buff->unhappiness );
 	ccl_kernel_set_arg( krnl->unhapp_stp1_reduce, 1, ccl_arg_local( lws->unhapp_stp1_reduce[ 0 ], cl_float ) );
 	ccl_kernel_set_arg( krnl->unhapp_stp1_reduce, 2, dev_buff->unhapp_reduced );
 
-	/* 'unhappiness_stp2_average' kernel arguments. */
+	/** 'unhappiness_stp2_average' kernel arguments. */
 	ccl_kernel_set_arg( krnl->unhapp_stp2_average, 0, dev_buff->unhapp_reduced );
 	ccl_kernel_set_arg( krnl->unhapp_stp2_average, 1, ccl_arg_local( lws->unhapp_stp2_average[ 0 ], cl_float ) );
 	ccl_kernel_set_arg( krnl->unhapp_stp2_average, 2, dev_buff->unhapp_average );
@@ -1131,82 +1135,6 @@ error_handler:
 
 
 
-/**
- *	Compute the world heat. That is, the two step operation, diffusion
- *	followed by evaporation.
- *	*/
-static inline void comp_world_heat( HBKernels_t *const krnl, HBGlobalWorkSizes_t *const gws, HBLocalWorkSizes_t *const lws, OCLObjects_t *const oclobj, HBDeviceBuffers_t *const dev_buff, HBHostBuffers_t *const hst_buff, HBBuffersSize_t *const bufsz, HBBufferSelect_t *const bufsel, Parameters_t *const params,  GError **err )
-{
-	GError *err_comp_world_heat = NULL;
-
-	/* Events. */
-	/* CCLEvent *evt_rdwr = NULL; */		/* Event termination signal for reads and writes. */
-	CCLEvent *evt_krnl_exec = NULL;		/* Event termination signal for kernel execution. */
-	CCLEventWaitList ewl = NULL;		/* Event Waiting List. A list of OpenCL events for operations to be finished. */
-
-
-	hbprintf( "Compute world heat:\n\tgws = [%zu,%zu]; lws = [%zu,%zu]\n\n", gws->comp_world_heat[0], gws->comp_world_heat[1], lws->comp_world_heat[0], lws->comp_world_heat[1] );
-
-
-// DEBUG: Only to test diffusion and evaporation: Init a heat map.
-//	for ( cl_uint i = 0; i < params->world_size; ++i )
-//		hst_buff->heat_map[0][i] = i + 1.0f;
-
-
-
-// DEBUG: Only to test diffusion and evaporation: Send buffer to device.
-//	evt_rdwr = ccl_buffer_enqueue_write( dev_buff->heat_map[0], oclobj->queue, NON_BLOCK, 0, bufsz->heat_map, hst_buff->heat_map[0], &ewl, &err_comp_world_heat );
-//	hb_if_err_propagate_goto( err, err_comp_world_heat, error_handler );
-
-//	ccl_event_wait_list_add( &ewl, evt_rdwr, NULL );
-
-
-
-	/** Compute world heat. */
-
-	ccl_kernel_set_arg( krnl->comp_world_heat, 0, dev_buff->heat_map[0] );
-	ccl_kernel_set_arg( krnl->comp_world_heat, 1, dev_buff->heat_map[1] );
-
-	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->comp_world_heat, oclobj->queue, DIMS_2, NULL, gws->comp_world_heat, lws->comp_world_heat, &ewl, &err_comp_world_heat );
-	hb_if_err_propagate_goto( err, err_comp_world_heat, error_handler );
-
-	/* Add kernel termination event to the wait list. */
-	ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
-
-	ccl_event_wait( &ewl, &err_comp_world_heat );
-	hb_if_err_propagate_goto( err, err_comp_world_heat, error_handler );
-
-
-	/* DEBUG: check world map. */
-/*
-	evt_rdwr = ccl_buffer_enqueue_read( dev_buff->heat_map[0], oclobj->queue, NON_BLOCK, 0, bufsz->heat_map, hst_buff->heat_map[0], &ewl, &err_comp_world_heat );
-	hb_if_err_propagate_goto( err, err_comp_world_heat, error_handler );
-
-	evt_rdwr = ccl_buffer_enqueue_read( dev_buff->heat_map[1], oclobj->queue, NON_BLOCK, 0, bufsz->heat_map, hst_buff->heat_map[1], &ewl, &err_comp_world_heat );
-	hb_if_err_propagate_goto( err, err_comp_world_heat, error_handler );
-
-	ccl_event_wait_list_add( &ewl, evt_rdwr, NULL );
-
-	ccl_event_wait( &ewl, &err_comp_world_heat );
-	hb_if_err_propagate_goto( err, err_comp_world_heat, error_handler );
-*/
-
-	/* Show heat map. */
-//	hbprintf( "Computed result for heatmap:\n" );
-//	for (cl_uint i = 0; i < params->world_size; ++i) {
-//		if (i % params->world_width == 0 ) hbprintf ("-----------------\n");
-//		hbprintf( "%f -> %f\n", hst_buff->heat_map[0][i], hst_buff->heat_map[1][i] );
-//	}
-
-
-error_handler:
-	/* If error handler is reached leave function imediately. */
-
-	return;
-}
-
-
-
 static inline void simulate( const HBKernels_t *const krnl,
 	const HBGlobalWorkSizes_t *const gws,
 	const HBLocalWorkSizes_t *const lws,
@@ -1226,7 +1154,8 @@ static inline void simulate( const HBKernels_t *const krnl,
 
 
 
-	/** Get unhappiness, call reduction first. */
+	/** Get unhappiness. */
+	/* Call reduction first, because initial state does already contain the bug's unhappiness. */
 
 	/* Reduce step 1: */
 	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->unhapp_stp1_reduce,
@@ -1277,23 +1206,18 @@ static inline void simulate( const HBKernels_t *const krnl,
 	/**      SIMULATION LOOP      **/
 	/*******************************/
 
-	while ( (iter_counter < params->numIterations)
-		|| (params->numIterations == 0) )
+	while ( (iter_counter < params->numIterations) || (params->numIterations == 0) )
 	{
 		/** Compute world heat, diffusion followed by evaporation. */
 
 		/* Set transient arguments, using 'bufsel' to switch over. */
-		ccl_kernel_set_arg( krnl->comp_world_heat, 0,
-					dev_buff->heat_map[ bufsel.main ] );
-		ccl_kernel_set_arg( krnl->comp_world_heat, 1,
-					dev_buff->heat_map[ bufsel.secd ] );
+		ccl_kernel_set_arg( krnl->comp_world_heat, 0, dev_buff->heat_map[ bufsel.main ] );
+		ccl_kernel_set_arg( krnl->comp_world_heat, 1, dev_buff->heat_map[ bufsel.secd ] );
 
-		evt_krnl_exec =
-			ccl_kernel_enqueue_ndrange( krnl->comp_world_heat,
+		evt_krnl_exec =	ccl_kernel_enqueue_ndrange( krnl->comp_world_heat,
 					oclobj->queue, DIMS_2, NULL,
-					gws->comp_world_heat,
-					lws->comp_world_heat, &ewl,
-					&err_simul );
+					gws->comp_world_heat, lws->comp_world_heat,
+					&ewl, &err_simul );
 		hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 		/* Add kernel termination event to wait list. */
@@ -1303,15 +1227,13 @@ static inline void simulate( const HBKernels_t *const krnl,
 		/** Perform bug step. */
 
 		/* Set transient argument, using 'bufsel' to use apropriate buffer. */
-		ccl_kernel_set_arg( krnl->bug_step, 2,
-					dev_buff->heat_map[ bufsel.secd ] );
+		ccl_kernel_set_arg( krnl->bug_step, 2, dev_buff->heat_map[ bufsel.secd ] );
 
 
-		evt_krnl_exec =
-			ccl_kernel_enqueue_ndrange( krnl->bug_step,
+		evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->bug_step,
 					oclobj->queue, DIMS_1, NULL,
-					gws->bug_step, lws->bug_step, &ewl,
-					&err_simul );
+					gws->bug_step, lws->bug_step,
+					&ewl, &err_simul );
 		hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 		/* Add kernel termination event to wait list. */
@@ -1321,24 +1243,20 @@ static inline void simulate( const HBKernels_t *const krnl,
 		/** Get unhappiness. */
 
 		/* Reduce step 1: */
-		evt_krnl_exec =
-			ccl_kernel_enqueue_ndrange( krnl->unhapp_stp1_reduce,
+		evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->unhapp_stp1_reduce,
 					oclobj->queue, DIMS_1, NULL,
-					gws->unhapp_stp1_reduce,
-					lws->unhapp_stp1_reduce, &ewl,
-					&err_simul );
-			hb_if_err_propagate_goto( err, err_simul, error_handler );
+					gws->unhapp_stp1_reduce, lws->unhapp_stp1_reduce,
+					&ewl, &err_simul );
+		hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 		/* Add 'kernel termination' event to the wait list. */
 		ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
 
 		/* Reduce step 2: */
-		evt_krnl_exec =
-			ccl_kernel_enqueue_ndrange( krnl->unhapp_stp2_average,
+		evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->unhapp_stp2_average,
 					oclobj->queue, DIMS_1, NULL,
-					gws->unhapp_stp2_average,
-					lws->unhapp_stp2_average, &ewl,
-					&err_simul );
+					gws->unhapp_stp2_average, lws->unhapp_stp2_average,
+					&ewl, &err_simul );
 		hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 		/* Add 'kernel termination' event to the wait list. */
@@ -1361,14 +1279,14 @@ static inline void simulate( const HBKernels_t *const krnl,
 		hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 
-		iter_counter++;
-
 		/* Output result to file. */
 		fprintf( hbResultFile, "%.17g\n", *hst_buff->unhapp_average );
 
-
 		/* Swap buffer's indices. */
 		SWAP( cl_uint, bufsel.main, bufsel.secd );
+
+		/* Next iteration. */
+		iter_counter++;
 	}
 
 
@@ -1475,7 +1393,7 @@ clean_all:
 	/* if (hst_buff.swarm_map)	free( hst_buff.swarm_map ); */
 	/* if (hst_buff.swarm)		free( hst_buff.swarm ); */
 	/* if (hst_buff.rng_state)	free( hst_buff.rng_state ); */
-	if (hst_buff.step_retry_flag)	free( hst_buff.step_retry_flag );
+	if (hst_buff.bug_step_retry)	free( hst_buff.bug_step_retry );
 
 	/* Destroy Device buffers. */
 	if (dev_buff.unhapp_average)	ccl_buffer_destroy( dev_buff.unhapp_average );
@@ -1486,7 +1404,7 @@ clean_all:
 	if (dev_buff.swarm_map)		ccl_buffer_destroy( dev_buff.swarm_map );
 	if (dev_buff.swarm_bugPosition)	ccl_buffer_destroy( dev_buff.swarm_bugPosition );
 	if (dev_buff.rng_state)		ccl_buffer_destroy( dev_buff.rng_state );
-	if (dev_buff.step_retry_flag)	ccl_buffer_destroy( dev_buff.step_retry_flag );
+	if (dev_buff.bug_step_retry)	ccl_buffer_destroy( dev_buff.bug_step_retry );
 
 	/** Destroy kernel wrappers. */
 	if (krnl.unhapp_stp2_average)	ccl_kernel_destroy( krnl.unhapp_stp2_average );
