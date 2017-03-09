@@ -8,6 +8,12 @@
 # -lm   : Link with math library.
 # -ansi : the same as -std=c89
 
+#https://www.linuxquestions.org/questions/programming-9/gcc-warn_unused_result-attribute-917158/
+# -U_FORTIFY_SOURCE
+# or
+# -D_FORTIFY_SOURCE=0
+# Disable warnings like: warning: ignoring return value of ‘fread’...
+
 
 # Variable definitions.
 CC = gcc
