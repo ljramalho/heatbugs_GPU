@@ -927,9 +927,9 @@ static inline void setKernelParameters( const HBKernels_t *const krnl,
 	ccl_kernel_set_arg( krnl->init_swarm, 3, dev_buff->rng_state );
 
 	/** 'set_bug_move_state' kernel arguments.                        */
-	ccl_kernel_set_arg( krnl->set_bug_move_state, 0, dev_buf->swarm_bugPosition );
-	ccl_kernel_set_arg( krnl->set_bug_move_state, 1, dev_buf->swarm_map );
-	ccl_kernel_set_arg( krnl->set_bug_move_state, 2, dev_buf->bug_step_retry );
+	ccl_kernel_set_arg( krnl->set_bug_move_state, 0, dev_buff->swarm_bugPosition );
+	ccl_kernel_set_arg( krnl->set_bug_move_state, 1, dev_buff->swarm_map );
+	ccl_kernel_set_arg( krnl->set_bug_move_state, 2, dev_buff->bug_step_retry );
 
 	/** 'bug_step' kernel arguments. */
 	ccl_kernel_set_arg( krnl->bug_step, 0, dev_buff->swarm_bugPosition );
