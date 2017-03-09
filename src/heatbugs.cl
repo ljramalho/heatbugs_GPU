@@ -466,8 +466,7 @@ __kernel void init_swarm( __global uint *swarm_bugPosition,
 	do {
 		bug_locus = randomInt( 0, WORLD_SIZE, &rng_state[ bug_id ] );
 
-		bug_old = atomic_cmpxchg( &swarm_map[ bug_locus ],
-							EMPTY_CELL, bug_new );
+		bug_old = atomic_cmpxchg( &swarm_map[ bug_locus ], EMPTY_CELL, bug_new );
 
 	} while ( HAS_BUG( bug_old ) );
 

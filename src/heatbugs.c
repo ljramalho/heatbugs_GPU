@@ -216,16 +216,10 @@ typedef struct hb_buffers_size {
 } HBBuffersSize_t;
 
 
-/** Buffer selectors. In each step they swap value to indicate the correct 'heat_map' buffer to be sent to kernel. */
-typedef struct hb_buffer_select {
-	cl_uint main;			/* Main buffer selector. */
-	cl_uint secd;			/* Secondary buffer selector. */
-} HBBufferSelect_t;
 
 
 
-
-const char version[] = "Heatbugs simulation for GPU (parallel processing) v2.6.";
+const char version[] = "Heatbugs simulation for GPU (parallel processing) v3.0.";
 
 
 
@@ -407,8 +401,7 @@ static inline void getSimulParameters( Parameters_t *const params, int argc,
 
 	/*
 	   NOTE: Check here for extra arguments... see:
-	   https://www.gnu.org/software/libc/manual/html_node/Example
-	   -of-Getopt.html
+	   	 https://www.gnu.org/software/libc/manual/html_node/Example-of-Getopt.html
 	 */
 
 	params->world_size = params->world_height * params->world_width;
@@ -427,8 +420,7 @@ static inline void getSimulParameters( Parameters_t *const params, int argc,
 	/* Check range related erros in bug's ideal temperature. */
 	/* Checking order matters!                               */
 	hb_if_err_create_goto( *err, HB_ERROR,
-		params->bugs_temperature_min_ideal >
-					params->bugs_temperature_max_ideal,
+		params->bugs_temperature_min_ideal > params->bugs_temperature_max_ideal,
 		HB_TEMPERATURE_OVERLAP, error_handler,
 		"Bug's ideal temperature range overlaps." );
 
@@ -451,8 +443,7 @@ static inline void getSimulParameters( Parameters_t *const params, int argc,
 
 	/* If numeber of bugs is 80% of the world space issue a warning. */
 	if (params->bugs_number >= 0.8 * params->world_size)
-		fprintf( stderr,
-			"Warning: Bugs number near available world slots.\n" );
+		fprintf( stderr, "Warning: Bugs number near available world slots.\n" );
 
 
 error_handler:
@@ -520,23 +511,19 @@ static inline void getOCLObjects( OCLObjects_t *const oclobj,
 	 * Query device for importante parameters before program's build, so
 	 * those parameters can be send to the kernel as external defines.
 	*/
-	ccl_kernel_suggest_worksizes( NULL, oclobj->dev, DIMS_1,
-		&params->bugs_number, gws->unhapp_stp1_reduce,
-		lws->unhapp_stp1_reduce, &err_get_oclobj );
+	ccl_kernel_suggest_worksizes( NULL, oclobj->dev, DIMS_1, &params->bugs_number,
+		gws->unhapp_stp1_reduce, lws->unhapp_stp1_reduce, &err_get_oclobj );
 	hb_if_err_propagate_goto( err, err_get_oclobj, error_handler );
 
 	/*
 	* MIN(...) included by cf4ocl2 from glib/gmacros.h.
 	*
-	* Next line bound the size of global work size to the square of the
-	* local work size, so reduce step 1 work.
+	* Next line bind the size of 'global work size' to the square of the
+	* 'local work size', so reduce step 1 work.
 	*/
-	gws->unhapp_stp1_reduce[ 0 ] =
-		MIN( SQUARE( lws->unhapp_stp1_reduce[ 0 ] ),
-			gws->unhapp_stp1_reduce[ 0 ] );
+	gws->unhapp_stp1_reduce[ 0 ] = MIN( SQUARE( lws->unhapp_stp1_reduce[ 0 ] ), gws->unhapp_stp1_reduce[ 0 ] );
 
-	params->reduce_num_workgroups =
-		gws->unhapp_stp1_reduce[ 0 ] / lws->unhapp_stp1_reduce[ 0 ];
+	params->reduce_num_workgroups = gws->unhapp_stp1_reduce[ 0 ] / lws->unhapp_stp1_reduce[ 0 ];
 
 
 	sprintf( cl_compiler_opts, cl_compiler_opts_template,
@@ -1168,7 +1155,12 @@ static inline void simulate( const HBKernels_t *const krnl,
         CCLEvent *evt_krnl_exec = NULL;	    /* Kernel exec termination event. */
         CCLEventWaitList ewl = NULL;	    /* Event wait list. */
 
-        HBBufferSelect_t bufsel;	    /* Buffer selectors. */
+         /* Buffer selectors. In each step they swap value to indicate the correct 'heat_map' buffer to be sent to kernel. */
+        struct {
+        	cl_uint main;		    /* Heatmap main.   */
+        	cl_uint secd;		    /* Heatmap buffer. */
+        } bufsel;
+
         size_t iter_counter;		    /* Iteration counter. */
 
 
@@ -1177,18 +1169,16 @@ static inline void simulate( const HBKernels_t *const krnl,
 	/* Call reduction first, because initial state does already contain the bug's unhappiness. */
 
 	/* Reduce step 1: */
-	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->unhapp_stp1_reduce,
-			oclobj->queue, DIMS_1, NULL, gws->unhapp_stp1_reduce,
-			lws->unhapp_stp1_reduce, &ewl, &err_simul );
+	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->unhapp_stp1_reduce, oclobj->queue, DIMS_1, NULL,
+			gws->unhapp_stp1_reduce, lws->unhapp_stp1_reduce, &ewl, &err_simul );
 	hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 	/* Add 'kernel termination' event to the wait list. */
 	ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
 
 	/* Reduce step 2: */
-	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->unhapp_stp2_average,
-			oclobj->queue, DIMS_1, NULL, gws->unhapp_stp2_average,
-			lws->unhapp_stp2_average, &ewl, &err_simul );
+	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->unhapp_stp2_average, oclobj->queue, DIMS_1, NULL,
+			gws->unhapp_stp2_average, lws->unhapp_stp2_average, &ewl, &err_simul );
 	hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 	/* Add 'kernel termination' event to the wait list. */
@@ -1197,9 +1187,8 @@ static inline void simulate( const HBKernels_t *const krnl,
 
 	/** read unhappiness. */
 
-	evt_rdwr = ccl_buffer_enqueue_read( dev_buff->unhapp_average,
-			oclobj->queue, NON_BLOCK, 0, bufsz->unhapp_average,
-			hst_buff->unhapp_average, &ewl, &err_simul );
+	evt_rdwr = ccl_buffer_enqueue_read( dev_buff->unhapp_average, oclobj->queue, NON_BLOCK, 0,
+			bufsz->unhapp_average, hst_buff->unhapp_average, &ewl, &err_simul );
 	hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 	/* Add read termination event to the wait list. */
@@ -1233,10 +1222,8 @@ static inline void simulate( const HBKernels_t *const krnl,
 		ccl_kernel_set_arg( krnl->comp_world_heat, 0, dev_buff->heat_map[ bufsel.main ] );
 		ccl_kernel_set_arg( krnl->comp_world_heat, 1, dev_buff->heat_map[ bufsel.secd ] );
 
-		evt_krnl_exec =	ccl_kernel_enqueue_ndrange( krnl->comp_world_heat,
-					oclobj->queue, DIMS_2, NULL,
-					gws->comp_world_heat, lws->comp_world_heat,
-					&ewl, &err_simul );
+		evt_krnl_exec =	ccl_kernel_enqueue_ndrange( krnl->comp_world_heat, oclobj->queue, DIMS_2, NULL,
+					gws->comp_world_heat, lws->comp_world_heat, &ewl, &err_simul );
 		hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 		/* Add kernel termination event to wait list. */
@@ -1245,37 +1232,38 @@ static inline void simulate( const HBKernels_t *const krnl,
 
 		/** Perform bug step. */
 
-		/* Set transient argument, using 'bufsel' to use apropriate buffer. */
+		/* Set transient argument, using 'bufsel' to use apropriate heat buffer. */
 		ccl_kernel_set_arg( krnl->bug_step, 2, dev_buff->heat_map[ bufsel.secd ] );
 
+		/* Loop bug_step kernel call, until all bugs resolve their movement status. */
+		do {
+			evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->bug_step, oclobj->queue, DIMS_1, NULL,
+						gws->bug_step, lws->bug_step, &ewl, &err_simul );
+			hb_if_err_propagate_goto( err, err_simul, error_handler );
 
-		evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->bug_step,
-					oclobj->queue, DIMS_1, NULL,
-					gws->bug_step, lws->bug_step,
-					&ewl, &err_simul );
-		hb_if_err_propagate_goto( err, err_simul, error_handler );
+			/* Add kernel termination event to wait list. */
+			ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
 
-		/* Add kernel termination event to wait list. */
-		ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
+			/* Check flag 'bug_step_retry' to determine if kernel should be called again. */
+
+
+		} while (hst_buff->bug_step_retry);
+
 
 
 		/** Get unhappiness. */
 
 		/* Reduce step 1: */
-		evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->unhapp_stp1_reduce,
-					oclobj->queue, DIMS_1, NULL,
-					gws->unhapp_stp1_reduce, lws->unhapp_stp1_reduce,
-					&ewl, &err_simul );
+		evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->unhapp_stp1_reduce, oclobj->queue, DIMS_1, NULL,
+					gws->unhapp_stp1_reduce, lws->unhapp_stp1_reduce, &ewl, &err_simul );
 		hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 		/* Add 'kernel termination' event to the wait list. */
 		ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
 
 		/* Reduce step 2: */
-		evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->unhapp_stp2_average,
-					oclobj->queue, DIMS_1, NULL,
-					gws->unhapp_stp2_average, lws->unhapp_stp2_average,
-					&ewl, &err_simul );
+		evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->unhapp_stp2_average, oclobj->queue, DIMS_1, NULL,
+					gws->unhapp_stp2_average, lws->unhapp_stp2_average, &ewl, &err_simul );
 		hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 		/* Add 'kernel termination' event to the wait list. */
@@ -1283,11 +1271,8 @@ static inline void simulate( const HBKernels_t *const krnl,
 
 		/* Read unhappiness. */
 
-		evt_rdwr = ccl_buffer_enqueue_read( dev_buff->unhapp_average,
-					oclobj->queue, NON_BLOCK, 0,
-					bufsz->unhapp_average,
-					hst_buff->unhapp_average, &ewl,
-					&err_simul );
+		evt_rdwr = ccl_buffer_enqueue_read( dev_buff->unhapp_average, oclobj->queue, NON_BLOCK, 0,
+					bufsz->unhapp_average, hst_buff->unhapp_average, &ewl, &err_simul );
 		hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 		/* Add read termination event to the wait list. */
