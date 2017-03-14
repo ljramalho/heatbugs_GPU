@@ -494,11 +494,10 @@ __kernel void init_swarm( __global uint *swarm_bugPosition,
 /*
  * Change all bugs to "want to move" state.
  *
- * This kernel changes the 8 LSB bits of all bug's representation, (as defined
- * by the macro 'BUG'), to the hexadecimal value 'aa', meaning the bug wants to
- * move.
+ * This kernel changes the 8 LSB bits of all bug's representation, (as defined by the macro 'BUG'),
+ * to the hexadecimal value 'aa', meaning the bug wants to move.
  * */
-__kernel void set_bug_move_state( __global uint *swarm_bugPosition,
+__kernel void prepare_bug_step( __global uint *swarm_bugPosition,
 				  __global uint *swarm_map,
 				  __global uint *bug_step_retry )
 {
@@ -511,14 +510,25 @@ __kernel void set_bug_move_state( __global uint *swarm_bugPosition,
 	if (bug_id >= BUGS_NUMBER) return;
 
 
-	/* Get a bug location. */
+	/* Get the bug location. */
 	bug_locus = swarm_bugPosition[ bug_id ];
 
 	/* Set the bug in the swarm to the 'want to move' state, preparing next iteration. */
 	SET_BUG_TO_MOVE( swarm_map[ bug_locus ] );
 
+	return;
+}
+
+
+
+/** */
+__kernel void prepare_step_report( __global uint *bug_step_retry )
+{
+	const uint id = get_global_id( 0 );
+
 	/* Reset bug_step retry flag. */
-	if (bug_id == 0) bug_step_retry[ bug_id ] = RST_BUG_STEP_FLAG;
+	if (id == 0)
+		bug_step_retry[ id ] = RST_BUG_STEP_FLAG;
 
 	return;
 }
