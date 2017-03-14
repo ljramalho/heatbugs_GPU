@@ -498,8 +498,7 @@ __kernel void init_swarm( __global uint *swarm_bugPosition,
  * to the hexadecimal value 'aa', meaning the bug wants to move.
  * */
 __kernel void prepare_bug_step( __global uint *swarm_bugPosition,
-				  __global uint *swarm_map,
-				  __global uint *bug_step_retry )
+				  __global uint *swarm_map )
 {
 	__private uint bug;
 	__private uint on_locus;
@@ -521,7 +520,7 @@ __kernel void prepare_bug_step( __global uint *swarm_bugPosition,
 
 
 
-/** */
+/** Reset the 'bug_step_retry' flga to prepare agents to signal host to repeat bug_step kernel. */
 __kernel void prepare_step_report( __global uint *bug_step_retry )
 {
 	const uint id = get_global_id( 0 );
@@ -707,35 +706,34 @@ __kernel void bug_step(	__global uint *swarm_bugPosition,
 	   neighbour or drop bug_step if it is impossible to find any.
 	 * */
 
-	todo = FIND_ANY_FREE;
-	bug_new_locus = best_Free_Neighbour( todo, heat_map, swarm_map,
-					bug_locus, &rng_state[ bug_id ] );
+	// todo = FIND_ANY_FREE;
+	// bug_new_locus = best_Free_Neighbour( todo, heat_map, swarm_map, bug_locus, &rng_state[ bug_id ] );
 
 	/* Here, there is NO free neighbour. Bug must stay in same location */
-	if (bug_new_locus == bug_locus)
-	{
+	// if (bug_new_locus == bug_locus)
+	// {
 		/* Bug hasn't move we don't need to update swarm_bugPosition. */
-		heat_map[ bug_locus ] += bug_output_heat;
-		return;
-	}
+	//	heat_map[ bug_locus ] += bug_output_heat;
+	//	return;
+	// }
 
 
 	/* Otherwise, try to store the bug in his new 'random' */
 	/* location and return.                                */
-	new_locus = atomic_cmpxchg( &swarm_map[ bug_new_locus ], EMPTY_CELL, bug );
+	// new_locus = atomic_cmpxchg( &swarm_map[ bug_new_locus ], EMPTY_CELL, bug );
 
-	if (HAS_NO_BUG( new_locus ))
-	{
+	// if (HAS_NO_BUG( new_locus ))
+	// {
 		/* SUCCESS! Reset old bug location. */
 		/* Must be atomic in case another workitem is trying to read. */
-		atomic_xchg( &swarm_map[ bug_locus ], EMPTY_CELL );
-		heat_map[ bug_new_locus ] += bug_output_heat;
+	//	atomic_xchg( &swarm_map[ bug_locus ], EMPTY_CELL );
+	//	heat_map[ bug_new_locus ] += bug_output_heat;
 
 		/* Update bug location in the swarm. */
-		swarm_bugPosition[ bug_id ] = bug_new_locus;
+	//	swarm_bugPosition[ bug_id ] = bug_new_locus;
 
-		return;
-	}
+	//	return;
+	// }
 
 	/* Bug failled to move and stay at current location. */
 	heat_map[ bug_locus ] += bug_output_heat;

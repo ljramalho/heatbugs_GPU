@@ -948,10 +948,12 @@ static inline void setKernelParameters( const HBKernels_t *const krnl,
 	ccl_kernel_set_arg( krnl->init_swarm, 2, dev_buff->unhappiness );
 	ccl_kernel_set_arg( krnl->init_swarm, 3, dev_buff->rng_state );
 
-	/** 'set_bug_move_state' kernel arguments.                        */
+	/** 'prepare_bug_step' kernel arguments.                        */
 	ccl_kernel_set_arg( krnl->prepare_bug_step, 0, dev_buff->swarm_bugPosition );
 	ccl_kernel_set_arg( krnl->prepare_bug_step, 1, dev_buff->swarm_map );
-	ccl_kernel_set_arg( krnl->prepare_bug_step, 2, dev_buff->bug_step_retry );
+
+	/** 'prepare_step_report' kernel arguments. */
+	ccl_kernel_set_arg( krnl->prepare_step_report, 0, dev_buff->bug_step_retry );
 
 	/** 'bug_step' kernel arguments. */
 	ccl_kernel_set_arg( krnl->bug_step, 0, dev_buff->swarm_bugPosition );
@@ -1273,6 +1275,16 @@ static inline void simulate( const HBKernels_t *const krnl,
 		ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
 
 
+		/** Prepare bug step. */
+
+		evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->prepare_bug_step, oclobj->queue, DIMS_1, NULL,
+					gws->prepare_bug_step, lws->prepare_bug_step, &ewl, &err_simul );
+		hb_if_err_propagate_goto( err, err_simul, error_handler );
+
+		/* Add kernel termination event to wait list. */
+		ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
+
+
 		/** Perform bug step. */
 
 		/* Set transient argument, using 'bufsel' to use apropriate heat buffer. */
@@ -1280,6 +1292,16 @@ static inline void simulate( const HBKernels_t *const krnl,
 
 		/* Loop bug_step kernel call, until all bugs resolve their movement status. */
 		do {
+			/** Prepare step report. */
+
+			evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->prepare_step_report, oclobj->queue, DIMS_1, NULL,
+				gws->prepare_step_report, lws->prepare_step_report, &ewl, &err_simul );
+			hb_if_err_propagate_goto( err, err_simul, error_handler );
+
+			/* Add kernel termination event to wait list. */
+			ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
+
+
 			evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->bug_step, oclobj->queue, DIMS_1, NULL,
 						gws->bug_step, lws->bug_step, &ewl, &err_simul );
 			hb_if_err_propagate_goto( err, err_simul, error_handler );
