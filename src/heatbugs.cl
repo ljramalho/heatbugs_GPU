@@ -105,11 +105,16 @@
 #define GET_BUG_IDEAL_TEMPERATURE( uint_reg ) ( ((uint_reg) & 0xff000000) >> 24 )
 #define GET_BUG_OUTPUT_HEAT( uint_reg ) ( ((uint_reg) & 0x0000ff00) >> 8 )
 
-#define BUG_HAS_MOVED( uint_reg ) (((uint_reg) & 0x00ff00ff) != BUG)
+#define BUG_HAS_MOVED( uint_reg ) ((uint_reg & 0x00ff00ff) != BUG)
 
 
-#define RST_BUG_STEP_FLAG	0x00000000
-#define SET_BUG_STEP_FLAG	0xffffffff
+
+#define RST_BUG_STEP_RETRY_FLAG		0x00000000
+#define SET_BUG_STEP_RETRY_FLAG		0xffffffff
+
+#define RESET_REPEAT_STEP( uint_reg ) uint_reg = RST_BUG_STEP_RETRY_FLAG
+#define REPORT_REPEAT_STEP( uint_reg ) uint_reg = SET_BUG_STEP_RETRY_FLAG
+
 
 
 
@@ -443,7 +448,7 @@ __kernel void init_swarm( __global uint *swarm_bugPosition,
 	__private uint bug_ideal_temperature;	/* [0..200] */
 	__private uint bug_output_heat;		/* [0..100] */
 	__private uint bug_new;
-	__private uint bug_old;
+	__private uint on_locus;
 
 
 	const uint bug_id = get_global_id( 0 );
@@ -466,12 +471,11 @@ __kernel void init_swarm( __global uint *swarm_bugPosition,
 	do {
 		bug_locus = randomInt( 0, WORLD_SIZE, &rng_state[ bug_id ] );
 
-		bug_old = atomic_cmpxchg( &swarm_map[ bug_locus ], EMPTY_CELL, bug_new );
+		on_locus = atomic_cmpxchg( &swarm_map[ bug_locus ], EMPTY_CELL, bug_new );
 
-	} while ( HAS_BUG( bug_old ) );
+	} while ( HAS_BUG( on_locus ) );
 
-	barrier( CLK_GLOBAL_MEM_FENCE );    /* All still active workitems     */
-					    /* must arrive here before go on. */
+	barrier( CLK_GLOBAL_MEM_FENCE );	/* All still active workitems must arrive here to sync before go on. */
 
 	/* Store bug position in the swarm. */
 	swarm_bugPosition[ bug_id ] = bug_locus;
@@ -520,14 +524,15 @@ __kernel void prepare_bug_step( __global uint *swarm_bugPosition,
 
 
 
-/** Reset the 'bug_step_retry' flga to prepare agents to signal host to repeat bug_step kernel. */
+/** Reset the 'bug_step_retry' flag to prepare agents to signal host to repeat bug_step kernel. */
 __kernel void prepare_step_report( __global uint *bug_step_retry )
 {
 	const uint id = get_global_id( 0 );
 
+	if (id > 0) return;
+
 	/* Reset bug_step retry flag. */
-	if (id == 0)
-		bug_step_retry[ id ] = RST_BUG_STEP_FLAG;
+	*bug_step_retry = RST_BUG_STEP_RETRY_FLAG;
 
 	return;
 }
@@ -623,8 +628,14 @@ __kernel void bug_step(	__global uint *swarm_bugPosition,
  	 * */
 	if (bug_unhappiness == 0.0f)
 	{
-		/* Bug hasn't move, we don't need to update swarm_bugPosition. */
+		/* Bug hasn't move, so we don't need to update swarm_bugPosition. */
+
+		/* Put bug resting. */
+		SET_BUG_AT_REST( swarm_map[ bug_locus] );
+
+		/* Leave heat in the same bug position. */
 		heat_map[ bug_locus ] += bug_output_heat;
+
 		return;
 	}
 
@@ -647,26 +658,28 @@ __kernel void bug_step(	__global uint *swarm_bugPosition,
 		the order must be reversed since (1), when happen, takes
 		precedence over	(2) or (3), whatever (2) XOR (3) is true or not.
 
-		NOTE:
-			select(a, b, c) implements: 	(c) ? b : a
+		REMEMBER:  select(a, b, c), implements:	(c) ? b : a
 	*/
 
-	todo = select( FIND_MIN_TEMPERATURE, FIND_MAX_TEMPERATURE,
-				locus_temperature < bug_ideal_temperature );
+	todo = select( FIND_MIN_TEMPERATURE, FIND_MAX_TEMPERATURE, locus_temperature < bug_ideal_temperature );
 
-	todo = select( todo, FIND_ANY_FREE,
-		randomFloat( 0, 100, &rng_state[ bug_id ] ) < BUGS_RANDOM_MOVE_CHANCE );
+	todo = select( todo, FIND_ANY_FREE, randomFloat( 0, 100, &rng_state[ bug_id ] ) < BUGS_RANDOM_MOVE_CHANCE );
 
 
-	bug_new_locus = best_Free_Neighbour( todo, heat_map, swarm_map,
-					bug_locus, &rng_state[ bug_id ] );
+	bug_new_locus = best_Free_Neighbour( todo, heat_map, swarm_map,	bug_locus, &rng_state[ bug_id ] );
 
 
 	/* If bug's current location is already the best one... */
 	if (bug_new_locus == bug_locus)
 	{
 		/* Bug hasn't move, we don't need to update swarm_bugPosition. */
+
+		/* Put bug resting. */
+		SET_BUG_AT_REST( swarm_map[ bug_locus] );
+
+		/* Leave heat in the same bug position. */
 		heat_map[ bug_locus ] += bug_output_heat;
+
 		return;
 	}
 
@@ -680,6 +693,10 @@ __kernel void bug_step(	__global uint *swarm_bugPosition,
 		/* Should be atomic in case another work-item try to read. */
 		atomic_xchg( &swarm_map[ bug_locus ], EMPTY_CELL );
 
+		/* Put bug resting in his new location. */
+		SET_BUG_AT_REST( swarm_map[ bug_new_locus] );
+
+		/* Leave heat in the new bug position. */
 		heat_map[ bug_new_locus ] += bug_output_heat;
 
 		/* Update bug location in the swarm. */
@@ -694,6 +711,8 @@ __kernel void bug_step(	__global uint *swarm_bugPosition,
 	   Signal the host that there is an agent that hasn't move yet, meaning
 	   this kernel should be called again.
 	 * */
+
+	REPORT_REPEAT_STEP( *bug_step_retry );
 
 
 
@@ -736,7 +755,7 @@ __kernel void bug_step(	__global uint *swarm_bugPosition,
 	// }
 
 	/* Bug failled to move and stay at current location. */
-	heat_map[ bug_locus ] += bug_output_heat;
+	// heat_map[ bug_locus ] += bug_output_heat;
 
 	/* Bug hasn't move we don't need to update swarm_bugPosition. */
 

@@ -942,13 +942,13 @@ static inline void setKernelParameters( const HBKernels_t *const krnl,
 	ccl_kernel_set_arg( krnl->init_maps, 1, dev_buff->heat_map[0] );
 	ccl_kernel_set_arg( krnl->init_maps, 2, dev_buff->heat_map[1] );
 
-	/** 'init_swarm' kernel arguments. 'swarm[0]' and 'swarm[1]'      */
+	/** 'init_swarm' kernel arguments. 'swarm[0]' and 'swarm[1]'	  */
 	ccl_kernel_set_arg( krnl->init_swarm, 0, dev_buff->swarm_bugPosition );
 	ccl_kernel_set_arg( krnl->init_swarm, 1, dev_buff->swarm_map );
 	ccl_kernel_set_arg( krnl->init_swarm, 2, dev_buff->unhappiness );
 	ccl_kernel_set_arg( krnl->init_swarm, 3, dev_buff->rng_state );
 
-	/** 'prepare_bug_step' kernel arguments.                        */
+	/** 'prepare_bug_step' kernel arguments.			  */
 	ccl_kernel_set_arg( krnl->prepare_bug_step, 0, dev_buff->swarm_bugPosition );
 	ccl_kernel_set_arg( krnl->prepare_bug_step, 1, dev_buff->swarm_map );
 
