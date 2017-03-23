@@ -85,34 +85,22 @@
 
 /** Heatbugs own error manipulation. **/
 enum hb_error_codes {
-	/** Successfull operation. */
-	HB_SUCCESS = 0,
-	/** Invalid parameters. */
-	HB_INVALID_PARAMETER = -1,
-	/** A command line option with missing argument. */
-	HB_PARAM_ARG_MISSING = -2,
-	/** Unknown option in the command line. */
-	HB_PARAM_OPTION_UNKNOWN = -3,
-	/** Unknown option characters in command line. */
-	HB_PARAM_CHAR_UNKNOWN = -4,
-	/** Weird error occurred while parsing parameter. */
-	HB_PARAM_PARSING = -5,
-	/** Number of bugs is zero. */
-	HB_BUGS_ZERO = -6,
-	/** Bugs exceed world slots. */
-	HB_BUGS_OVERFLOW = -7,
-	/** Bug's ideal temperature range overlaps. */
-	HB_TEMPERATURE_OVERLAP = -8,
-	/** Bug's max ideal temperature exceeds range. */
-	HB_TEMPERATURE_OUT_RANGE = -9,
-	/** Bug's output heat range overlap. */
-	HB_OUTPUT_HEAT_OVERLAP = -10,
-	/** Bug's max output heat exceeds range. */
-	HB_OUTPUT_HEAT_OUT_RANGE = -11,
-	/** Unable to open file. */
-	HB_UNABLE_OPEN_FILE = -12,
-	/** Memory alocation failed. */
-	HB_MALLOC_FAILURE = -13
+	HB_SUCCESS = 0,				/* Successfull operation. */
+	HB_INVALID_PARAMETER = -1,		/* Invalid parameters. */
+	HB_PARAM_ARG_MISSING = -2,		/* A command line option with missing argument. */
+	HB_PARAM_OPTION_UNKNOWN = -3,		/* Unknown option in the command line. */
+	HB_PARAM_CHAR_UNKNOWN = -4,		/* Unknown option characters in command line. */
+	HB_PARAM_PARSING = -5,			/* Weird error occurred while parsing parameter. */
+	HB_BUGS_ZERO = -6,			/* Number of bugs is zero. */
+	HB_BUGS_OVERFLOW = -7,			/* Bugs exceed world slots. */
+	HB_TEMPERATURE_OVERLAP = -8,		/* Bug's ideal temperature range overlaps. */
+	HB_TEMPERATURE_OUT_RANGE = -9,		/* Bug's max ideal temperature exceeds range. */
+	HB_OUTPUT_HEAT_OVERLAP = -10,		/* Bug's output heat range overlap. */
+	HB_OUTPUT_HEAT_OUT_RANGE = -11,		/* Bug's max output heat exceeds range. */
+	HB_UNABLE_OPEN_FILE = -12,		/* Failed to open a file. */
+	HB_UNABLE_TO_READ_FILE = -13,		/* Failed to read a file. */
+	HB_MALLOC_FAILURE = -14			/* Memory alocation failed. */
+
 };
 
 #endif

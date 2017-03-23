@@ -280,8 +280,7 @@ inline uint best_Free_Neighbour( int todo, __global float *heat_map,
 
  		/* Actual bug location is the best location, until otherwise. */
 		best.s0 = bug_locus;			   /* Bug position.   */
-		best.s1 = as_uint( heat_map[ best.s0 ] );  /* Temperature at  */
-							   /* bug position. */
+		best.s1 = as_uint( heat_map[ best.s0 ] );  /* Temperature at bug's position. */
 
 		/* Loop unroll.  */
 		if (todo == FIND_MAX_TEMPERATURE)
@@ -345,8 +344,8 @@ inline uint best_Free_Neighbour( int todo, __global float *heat_map,
 
 
 	/*
-	 * Here: there is a random moving chance, or best neighbour is not free.
-	 * Try to find any available place.
+	   Here: there is a random moving chance, or best neighbour is not free.
+	   Try to find any available place.
 	 * */
 
 	/* Loop unroll. */
@@ -382,12 +381,12 @@ inline uint best_Free_Neighbour( int todo, __global float *heat_map,
 
 
 
-/*
+/**
  * ************* KERNELS ******************
  * */
 
 
-/*
+/**
  * Initiates the random generator by fill a vector of seeds / initial rng state.
  * Wang Hash, hash one integer into another.
  * Obliterate any correlation in the seeds when going wide (parallel), prior
@@ -419,8 +418,7 @@ __kernel void init_random( __global uint *rng_state )
 
 
 
-__kernel void init_maps( __global uint *swarm_map, __global float *heat_map,
-				__global float *heat_buffer )
+__kernel void init_maps( __global uint *swarm_map, __global float *heat_map, __global float *heat_buffer )
 {
 	const uint gid = get_global_id( 0 );
 
@@ -435,13 +433,11 @@ __kernel void init_maps( __global uint *swarm_map, __global float *heat_map,
 
 
 
-/*
+/**
  * Fill the world (swarm_map) with bugs, store their position (swarm_bugPosition).
  * Initiate the unhappiness for each bug.
  * */
-__kernel void init_swarm( __global uint *swarm_bugPosition,
-				__global uint *swarm_map,
-				__global float *unhappiness,
+__kernel void init_swarm( __global uint *swarm_bugPosition, __global uint *swarm_map, __global float *unhappiness,
 				__global uint *rng_state )
 {
 	__private uint bug_locus;
@@ -456,11 +452,9 @@ __kernel void init_swarm( __global uint *swarm_bugPosition,
 	if (bug_id >= BUGS_NUMBER) return;
 
 
-	bug_ideal_temperature = (ushort) randomInt( BUGS_TEMPERATURE_MIN_IDEAL,
-			BUGS_TEMPERATURE_MAX_IDEAL, &rng_state[ bug_id ] );
+	bug_ideal_temperature = (ushort) randomInt( BUGS_TEMPERATURE_MIN_IDEAL,	BUGS_TEMPERATURE_MAX_IDEAL, &rng_state[ bug_id ] );
 
-	bug_output_heat = (ushort) randomInt( BUGS_HEAT_MIN_OUTPUT,
-			BUGS_HEAT_MAX_OUTPUT, &rng_state[ bug_id ] );
+	bug_output_heat = (ushort) randomInt( BUGS_HEAT_MIN_OUTPUT, BUGS_HEAT_MAX_OUTPUT, &rng_state[ bug_id ] );
 
 	/* Create a bug. */
 	BUG_NEW( bug_new );
@@ -481,9 +475,9 @@ __kernel void init_swarm( __global uint *swarm_bugPosition,
 	swarm_bugPosition[ bug_id ] = bug_locus;
 
 	/*
-	 * Compute initial unhappiness as abs(ideal_temperature - temperature).
-	 * Since world temperature is initially zero, it turns out that initial
-	 * unhappiness = ideal_temperature.
+	   Compute initial unhappiness as abs(ideal_temperature - temperature).
+	   Since world temperature is initially zero, it turns out that initial
+	   unhappiness = ideal_temperature.
 	 * */
 
 	/* REPLACED: unhappiness[ bug_id ] = (float) bug_ideal_temperature; */
@@ -495,17 +489,16 @@ __kernel void init_swarm( __global uint *swarm_bugPosition,
 
 
 
-/*
- * Change all bugs to "want to move" state.
+/**
+ * Change all bugs to 'want to move' state.
  *
  * This kernel changes the 8 LSB bits of all bug's representation, (as defined by the macro 'BUG'),
  * to the hexadecimal value 'aa', meaning the bug wants to move.
  * */
-__kernel void prepare_bug_step( __global uint *swarm_bugPosition,
-				  __global uint *swarm_map )
+__kernel void prepare_bug_step( __global uint *swarm_bugPosition, __global uint *swarm_map )
 {
 	__private uint bug;
-	__private uint on_locus;
+	__private uint bug_locus;
 
 
 	const uint bug_id = get_global_id( 0 );
@@ -539,18 +532,18 @@ __kernel void prepare_step_report( __global uint *bug_step_retry )
 
 
 
-/*
+/**
  * Perform a bug movement in the world.
  *
- * Netlogo completely separates the report of the "best" / "random" location,
- * from the actual bug movement. Only when perform "bug-move", the availability
+ * Netlogo completely separates the report of the 'best' / 'random' location,
+ * from the actual bug movement. Only when perform 'bug-move', the availability
  * (status) of the reported location is checked, so an alternate free location,
  * if exists, is computed if necessary.
  *
- * This GPU version of the "bug-move" a.k.a "bug_step", uses the auxiliary
+ * This GPU version of the 'bug-move' a.k.a 'bug_step', uses the auxiliary
  * function find_Best_Neighbour(..), that does both at the same time, it checks
- * for the "winner", a location with max/min temperature that is also free of
- * bugs, or "any random" free location.
+ * for the 'winner', a location with max/min temperature that is also free of
+ * bugs, or 'any random' free location.
  *
  * The function best_Free_Neighbour(..) does its best to mimic netlogo behavior,
  * by packing the location report and the availability check into the same
@@ -566,12 +559,8 @@ __kernel void prepare_step_report( __global uint *bug_step_retry )
  * become occupied by a bug, setted by a concurrent thread.
  * So, in parallel execution, a 2-step operation may be required.
  * */
-__kernel void bug_step(	__global uint *swarm_bugPosition,
-			__global uint *swarm_map,
-			__global float *heat_map,
-			__global float *unhappiness,
-			__global uint *bug_step_retry,
-			__global uint *rng_state )
+__kernel void bug_step(	__global uint *swarm_bugPosition, __global uint *swarm_map, __global float *heat_map,
+				__global float *unhappiness, __global uint *bug_step_retry, __global uint *rng_state )
 {
 	__private uint bug_locus;
 	__private uint bug_new_locus;
@@ -594,10 +583,10 @@ __kernel void bug_step(	__global uint *swarm_bugPosition,
 	bug_locus = swarm_bugPosition[ bug_id ];
 
 	/*
-	 * Get a private copy of the bug while keeping the original in the swarm.
-	 *
-	 * Until this bug resolves his movement, the original one (with original
-	 * status) and his position is keept in swarm_map and swarm_bugPosition.
+	   Get a private copy of the bug while keeping the original in the swarm.
+
+	   Until this bug resolves his movement, the original one (with original
+	   status) and his position is keept in swarm_map and swarm_bugPosition.
 	 * */
 	bug = swarm_map[ bug_locus ];
 
@@ -619,12 +608,12 @@ __kernel void bug_step(	__global uint *swarm_bugPosition,
 	unhappiness[ bug_id ] = bug_unhappiness;
 
 	/*
-	 * Usually compare equality of floats is absurd. Netlogo wrapps the
-	 * code with: if (unhappiness > 0) { do stuff... }
-	 * I decided to unwrap, terminating as soon as possible using
-	 * if (bug_unhappiness == 0.0f) {...}  and continue the remaining code
-	 * as a fall out case for (bug_unhappiness > 0.0f). After all, this
-	 * is semantically equivalent to netlogo version.
+	   Usually compare equality of floats is absurd. Netlogo wrapps the
+	   code with: if (unhappiness > 0) { do stuff... }
+	   I decided to unwrap, terminating as soon as possible using
+	   if (bug_unhappiness == 0.0f) {...}  and continue the remaining code
+	   as a fall out case for (bug_unhappiness > 0.0f). After all, this
+	   is semantically equivalent to netlogo version.
  	 * */
 	if (bug_unhappiness == 0.0f)
 	{
@@ -647,15 +636,13 @@ __kernel void bug_step(	__global uint *swarm_bugPosition,
 	/*
 		Find the best place for the bug to go. Tricky stuff.
 
-		In order to implement netlogo approach, WITHOUT branching in
-		OpenCL kernel, that is (in netlogo order), to compute:
+		In order to implement netlogo approach, WITHOUT branching in OpenCL kernel, that is (in netlogo order), to compute:
 		1) random-move-chance,
-		2) best-patch for (temp <  ideal_temp) (when bug is in COLD),
-		3) best-patch for (temp >= ideal_temp) (when bug is in HOT),
+		2) best-patch for (temp <  ideal_temp) (when bug is COLD),
+		3) best-patch for (temp >= ideal_temp) (when bug is HOT),
 		the OpenCl kernel select(...) function must be used twice.
 
-		A variable is used to hold what to do, (1), (2) or (3). However
-		the order must be reversed since (1), when happen, takes
+		A variable is used to hold what to do, (1), (2) or (3). However	the order must be reversed since (1), when happen, takes
 		precedence over	(2) or (3), whatever (2) XOR (3) is true or not.
 
 		REMEMBER:  select(a, b, c), implements:	(c) ? b : a
@@ -764,8 +751,7 @@ __kernel void bug_step(	__global uint *swarm_bugPosition,
 
 
 
-__kernel void comp_world_heat( __global float *heat_map,
-					__global float *heat_buffer )
+__kernel void comp_world_heat( __global float *heat_map, __global float *heat_buffer )
 {
 	float heat = 0;
 	uint pos;
