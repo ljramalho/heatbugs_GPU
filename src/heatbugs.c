@@ -80,7 +80,7 @@
 /** Input data used for simulation. */
 typedef struct parameters {
 	size_t seed;					/* IN: The seed to be used. */
-	size_t reduce_num_workgroups;			/* 'reduce_num_workgroups' is used to send information across functions. */
+	size_t reduce_num_workgroups;			/* 'reduce_num_workgroups' used to send information across functions. */
 	size_t numIterations;				/* IN: Num Iterations to stop. (0 = non stop). */
 	size_t bugs_number;				/* IN: Number of bugs in the world. */
 	size_t world_width;				/* IN: World width size. */
@@ -91,8 +91,8 @@ typedef struct parameters {
 	float bugs_random_move_chance;			/* IN: [0..100], Chance a bug will move. */
 	unsigned int bugs_temperature_min_ideal;	/* IN: [0 .. 200], bug's minimum prefered temperature. */
 	unsigned int bugs_temperature_max_ideal;	/* IN: [0 .. 200], bug's maximum prefered temperature. */
-	unsigned int bugs_heat_min_output;		/* IN: [0 .. 100], min heat a bug leave in the world in each step. */
-	unsigned int bugs_heat_max_output;		/* IN: [0 .. 100], max heat a bug leave in the world in each step. */
+	unsigned int bugs_heat_min_output;		/* IN: [0 .. 100], min heat a bug leaves in the world per step. */
+	unsigned int bugs_heat_max_output;		/* IN: [0 .. 100], max heat a bug leaves in the world per step. */
 	char output_filename[256];			/* IN: File to send results. */
 } Parameters_t;
 
@@ -150,7 +150,7 @@ typedef struct hb_local_work_sizes {
 
 /** Host Buffers. */
 typedef struct hb_host_buffers {
-	cl_uint *bug_step_retry;	/* SIZE: 1		- In any iteration if set, it flags for another recall of the bug_step kernel. */
+	cl_uint *bug_step_retry;	/* SIZE: 1		- In any iteration if set, signals for another recall of the bug_step kernel. */
 //	cl_uint *rng_state;		/* SIZE: BUGS_NUM	- Random seeds buffer. DEBUG: (to remove). */
 //	cl_uint *swarm_bugPosition;	/* SIZE: BUGS_NUM	- Bug's position in the swarm_map, (swarm_bugPosition). */
 //	cl_uint *swarm_map;		/* SIZE: WORLD_SIZE	- Bugs map. Each cell is: 'ideal-Temperature':8bit 'bug':1bit 'output_heat':7bit. */
@@ -163,7 +163,7 @@ typedef struct hb_host_buffers {
 
 /** Device buffers. */
 typedef struct hb_device_buffers {
-	CCLBuffer *bug_step_retry;	/* SIZE: 1		- In any iteration if set, it flags for another recall of the bug_step kernel. */
+	CCLBuffer *bug_step_retry;	/* SIZE: 1		- In any iteration if set, signals for another recall of the bug_step kernel. */
 	CCLBuffer *rng_state;		/* SIZE: BUGS_NUM	- Random seeds buffer. */
 	CCLBuffer *swarm_bugPosition;	/* SIZE: BUGS_NUM	- Bug's position in the swarm_map, (swarm_bugPosition). */
 	CCLBuffer *swarm_map;		/* SIZE: WORLD_SIZE	- Bugs map. Each cell is: 'ideal-Temperature':8bit 'bug':1bit 'output_heat':7bit. */
@@ -210,13 +210,15 @@ inline int get_random_seed( size_t *seed )
 
 	uranddev = fopen( "/dev/urandom", "r" );
 
-	if (uranddev == NULL) return HB_UNABLE_OPEN_FILE;
+	if (uranddev == NULL)
+		return HB_UNABLE_OPEN_FILE;
 
 	rd_elem = fread( &val, sizeof( size_t ), 1, uranddev );
 
 	fclose( uranddev );
 
-	if (rd_elem != 1) return HB_UNABLE_TO_READ_FILE;
+	if (rd_elem != 1)
+		return HB_UNABLE_TO_READ_FILE;
 
 	*seed = val;
 
@@ -230,10 +232,10 @@ inline int get_random_seed( size_t *seed )
  * If there are no parameters, default parameters are used.
  * Default parameter will be used for every omitted parameter.
  *
- * This function uses the GNU 'getopt' command line argument parser, and requires the macro _GNU_SOURCE to be defined. As such, the
- * code using the 'getopt' function is not portable.
- * Consequence of using 'getopt' is that the previous result of 'argv' parameter may change after 'getopt' is used, therefore 'argv'
- * should not be used again.
+ * This function uses the GNU 'getopt' command line argument parser, and requires the macro _GNU_SOURCE to be defined.
+ * As such, the code using the 'getopt' function is not portable.
+ * Consequence of using 'getopt' is that the previous result of 'argv' parameter may change after 'getopt' is used,
+ * therefore 'argv' should not be used again.
  * The function 'getopt' is marked as Thread Unsafe.
  *
  * @param[out]	params - Parameters to be filled with default or
@@ -465,8 +467,9 @@ static inline void getOCLObjects( OCLObjects_t *const oclobj, HBGlobalWorkSizes_
 	hb_if_err_propagate_goto( err, err_get_oclobj, error_handler );
 
 	/*
-	 * Query device for importante parameters before program's build, so those parameters can be sent to the kernel as external defines.
-	 */
+	   Query device for importante parameters before program's build, so those parameters can be sent
+	   to the kernel as external defines.
+	 * */
 	ccl_kernel_suggest_worksizes( NULL, oclobj->dev, HB_DIMS_1, &params->bugs_number,
 						gws->unhapp_stp1_reduce, lws->unhapp_stp1_reduce, &err_get_oclobj );
 	hb_if_err_propagate_goto( err, err_get_oclobj, error_handler );
@@ -475,14 +478,16 @@ static inline void getOCLObjects( OCLObjects_t *const oclobj, HBGlobalWorkSizes_
 	    MIN(...) included by cf4ocl2 from glib/gmacros.h.
 
 	   Next line bind the size of 'global work size' to the square of the 'local work size', so reduce step 1 work.
-	   This work size is computed here because we need his value (reduce_num_workgroups) to be sent to the kernel as external defines.
+	   This work size is computed here because we need his value (reduce_num_workgroups) to be sent to the kernel
+	   as external defines.
 	 * */
 	gws->unhapp_stp1_reduce[ 0 ] = MIN( SQUARE( lws->unhapp_stp1_reduce[ 0 ] ), gws->unhapp_stp1_reduce[ 0 ] );
 
 
 	/*
 	   Get OpenCL build options to be sent as 'defines' to kernel, preventing the need to send extra arguments.
-	   These parameters work as 'work-items' private variables. A null terminated string is garanted in 'cl_compiler_opts'.
+	   These parameters work as 'work-items' private variables. A null terminated string is garanted in
+	   'cl_compiler_opts'.
 	 * */
 
 	params->reduce_num_workgroups = gws->unhapp_stp1_reduce[ 0 ] / lws->unhapp_stp1_reduce[ 0 ];
@@ -533,34 +538,37 @@ error_handler:
  * Remember memory flags ( cl_mem_flags  https://www.khronos.org/registry/OpenCL/sdk/2.0/docs/man/xhtml/enums.html ):
  *
  *      CL_MEM_READ_WRITE     - This flag specifies that the memory object will be read and written by a kernel.
- *                              This is the default.
+ *				This is the default.
  *
  *      CL_MEM_WRITE_ONLY     - This flags specifies that the memory object will be written but not read by a kernel.
- *                              Reading from a buffer or image object created with CL_MEM_WRITE_ONLY inside a kernel is undefined.
+ *				Reading from a buffer or image object created with CL_MEM_WRITE_ONLY inside a kernel
+ *				is undefined.
  *
  *	CL_MEM_READ_ONLY      -
  *
  *      CL_MEM_ALLOC_HOST_PTR - This flag specifies that the application wants the OpenCL implementation to allocate
- *                              memory from host accessible memory.
+ *				memory from host accessible memory.
  *				-- The OpenCL runtime will handle the alignment and size requirements.
  *				-- Buffer will be initialized in host or device code.
  *				-- Buffer must be map and unmap.
  *
- *	CL_MEM_USE_HOST_PTR   - This flag specifies that the buffer was already created in existing application code and the
- *				alignment and size rules were followed (alignment to 4096 byte boundary and size multiple of 64 bytes)
- *				when the buffer was allocated, or a tight control over buffer allocation must be exercised, and not
- *				just relying on OpenCL.
- *				-- Implementations don't garantee always return a zero copy buffers, meaning a copy might be
- *				   created (especialy when host and device are differente entities on different subsystems):
- *				   'OpenCL implementations are allowed to cache the buffer contents pointed to by host_ptr in
- *				   device memory. This cached copy can be used when kernels are executed on a device.'
+ *	CL_MEM_USE_HOST_PTR   - This flag specifies that the buffer was already created in existing application code and
+ *				the alignment and size rules were followed (alignment to 4096 byte boundary and size
+ *				multiple of 64 bytes) when the buffer was allocated, or a tight control over buffer
+ *				allocation must be exercised, and not just relying on OpenCL.
+ *				-- Implementations don't garantee always return a zero copy buffers, meaning a copy might
+ *				   be created (especialy when host and device are differente entities on different
+ *				   subsystems):
+ *				   'OpenCL implementations are allowed to cache the buffer contents pointed to by host_ptr
+ *				   in device memory. This cached copy can be used when kernels are executed on a device.'
  *
  *	CL_MEM_COPY_HOST_PTR  -
  *
  * NOTE: Check this about alignment (https://software.intel.com/en-us/articles/getting-the-most-from-opencl-12-how-to-increase-performance-by-minimizing-buffer-copies-on-intel-processor-graphics )
  * */
-static inline void setupBuffers( HBHostBuffers_t *const hst_buff, HBDeviceBuffers_t *const dev_buff, HBBuffersSize_t *const bufsz,
-					const OCLObjects_t *const oclobj, const Parameters_t *const params, CCLErr **err )
+static inline void setupBuffers( HBHostBuffers_t *const hst_buff, HBDeviceBuffers_t *const dev_buff,
+					HBBuffersSize_t *const bufsz, const OCLObjects_t *const oclobj,
+					const Parameters_t *const params, CCLErr **err )
 {
 	CCLErr *err_setbuf = NULL;
 
@@ -939,8 +947,9 @@ static inline void setKernelParameters( const HBKernels_t *const krnl, const HBD
 /**
  * Run all init kernels.
  * */
-static inline void initiate( HBKernels_t *const krnl, const HBGlobalWorkSizes_t *const gws, const HBLocalWorkSizes_t *const lws,
-				OCLObjects_t *const oclobj, HBDeviceBuffers_t *const dev_buff, HBHostBuffers_t *const hst_buff,
+static inline void initiate( HBKernels_t *const krnl, const HBGlobalWorkSizes_t *const gws,
+				const HBLocalWorkSizes_t *const lws, OCLObjects_t *const oclobj,
+				HBDeviceBuffers_t *const dev_buff, HBHostBuffers_t *const hst_buff,
 				const HBBuffersSize_t *const bufsz, const Parameters_t *const params, CCLErr **err )
 {
 	/** Events. */
@@ -1130,9 +1139,11 @@ error_handler:
 /**
  * NOTE: Check this about Buffer Read/Write vs. Map/Unmap ( http://downloads.ti.com/mctools/esd/docs/opencl/memory/access-model.html )
  * */
-static inline void simulate( const HBKernels_t *const krnl, const HBGlobalWorkSizes_t *const gws, const HBLocalWorkSizes_t *const lws,
-				OCLObjects_t *const oclobj, HBDeviceBuffers_t *const dev_buff, HBHostBuffers_t *const hst_buff,
-				HBBuffersSize_t *const bufsz, const Parameters_t *const params, FILE *hbResultFile, CCLErr **err )
+static inline void simulate( const HBKernels_t *const krnl, const HBGlobalWorkSizes_t *const gws,
+				const HBLocalWorkSizes_t *const lws, OCLObjects_t *const oclobj,
+				HBDeviceBuffers_t *const dev_buff, HBHostBuffers_t *const hst_buff,
+				HBBuffersSize_t *const bufsz, const Parameters_t *const params, FILE *hbResultFile,
+				CCLErr **err )
 {
 //	FILE *hbResultFile = NULL;
         CCLEvent *evt_rdwr = NULL;	    /* Read/Write termination event.  */
@@ -1156,7 +1167,8 @@ static inline void simulate( const HBKernels_t *const krnl, const HBGlobalWorkSi
 
 	/* Reduce step 1: */
 	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->unhapp_stp1_reduce, oclobj->queue, HB_DIMS_1, NULL,
-								gws->unhapp_stp1_reduce, lws->unhapp_stp1_reduce, &ewl, &err_simul );
+							gws->unhapp_stp1_reduce, lws->unhapp_stp1_reduce,
+							&ewl, &err_simul );
 	hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 	/* Add 'kernel termination' event to the wait list. */
@@ -1164,7 +1176,8 @@ static inline void simulate( const HBKernels_t *const krnl, const HBGlobalWorkSi
 
 	/* Reduce step 2: */
 	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->unhapp_stp2_average, oclobj->queue, HB_DIMS_1, NULL,
-								gws->unhapp_stp2_average, lws->unhapp_stp2_average, &ewl, &err_simul );
+							gws->unhapp_stp2_average, lws->unhapp_stp2_average,
+							&ewl, &err_simul );
 	hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 	/* Add 'kernel termination' event to the wait list. */
@@ -1174,7 +1187,8 @@ static inline void simulate( const HBKernels_t *const krnl, const HBGlobalWorkSi
 	/* read unhappiness. */
 
 	evt_rdwr = ccl_buffer_enqueue_read( dev_buff->unhapp_average, oclobj->queue, HB_NON_BLOCK, 0,
-							bufsz->unhapp_average, hst_buff->unhapp_average, &ewl, &err_simul );
+							bufsz->unhapp_average, hst_buff->unhapp_average,
+							&ewl, &err_simul );
 	hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 	/* Add read termination event to the wait list. */
@@ -1213,7 +1227,8 @@ static inline void simulate( const HBKernels_t *const krnl, const HBGlobalWorkSi
 		ccl_kernel_set_arg( krnl->comp_world_heat, 1, dev_buff->heat_map[ bufsel.secd ] );
 
 		evt_krnl_exec =	ccl_kernel_enqueue_ndrange( krnl->comp_world_heat, oclobj->queue, HB_DIMS_2, NULL,
-									gws->comp_world_heat, lws->comp_world_heat, &ewl, &err_simul );
+								gws->comp_world_heat, lws->comp_world_heat,
+								&ewl, &err_simul );
 		hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 		/* Add kernel termination event to wait list. */
@@ -1223,7 +1238,8 @@ static inline void simulate( const HBKernels_t *const krnl, const HBGlobalWorkSi
 		/** Prepare bug step. */
 
 		evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->prepare_bug_step, oclobj->queue, HB_DIMS_1, NULL,
-									gws->prepare_bug_step, lws->prepare_bug_step, &ewl, &err_simul );
+								gws->prepare_bug_step, lws->prepare_bug_step,
+								&ewl, &err_simul );
 		hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 		/* Add kernel termination event to wait list. */
@@ -1240,7 +1256,8 @@ static inline void simulate( const HBKernels_t *const krnl, const HBGlobalWorkSi
 			/** Prepare step report. */
 
 			evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->prepare_step_report, oclobj->queue, HB_DIMS_1, NULL,
-								gws->prepare_step_report, lws->prepare_step_report, &ewl, &err_simul );
+									gws->prepare_step_report, lws->prepare_step_report,
+									&ewl, &err_simul );
 			hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 			/* Add kernel termination event to wait list. */
@@ -1248,7 +1265,8 @@ static inline void simulate( const HBKernels_t *const krnl, const HBGlobalWorkSi
 
 
 			evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->bug_step, oclobj->queue, HB_DIMS_1, NULL,
-								gws->bug_step, lws->bug_step, &ewl, &err_simul );
+								gws->bug_step, lws->bug_step,
+								&ewl, &err_simul );
 			hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 			/* Add kernel termination event to wait list. */
@@ -1258,7 +1276,8 @@ static inline void simulate( const HBKernels_t *const krnl, const HBGlobalWorkSi
 			/* Check flag 'bug_step_retry' to determine if kernel should be called again. */
 
 			evt_rdwr = ccl_buffer_enqueue_read( dev_buff->bug_step_retry, oclobj->queue, HB_NON_BLOCK, 0,
-								bufsz->bug_step_retry, hst_buff->bug_step_retry, &ewl, &err_simul );
+								bufsz->bug_step_retry, hst_buff->bug_step_retry,
+								&ewl, &err_simul );
 			hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 			/* Add read termination event to the wait list. */
@@ -1279,7 +1298,8 @@ static inline void simulate( const HBKernels_t *const krnl, const HBGlobalWorkSi
 
 		/* Reduce step 1: */
 		evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->unhapp_stp1_reduce, oclobj->queue, HB_DIMS_1, NULL,
-								gws->unhapp_stp1_reduce, lws->unhapp_stp1_reduce, &ewl, &err_simul );
+								gws->unhapp_stp1_reduce, lws->unhapp_stp1_reduce,
+								&ewl, &err_simul );
 		hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 		/* Add 'kernel termination' event to the wait list. */
@@ -1287,7 +1307,8 @@ static inline void simulate( const HBKernels_t *const krnl, const HBGlobalWorkSi
 
 		/* Reduce step 2: */
 		evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->unhapp_stp2_average, oclobj->queue, HB_DIMS_1, NULL,
-								gws->unhapp_stp2_average, lws->unhapp_stp2_average, &ewl, &err_simul );
+								gws->unhapp_stp2_average, lws->unhapp_stp2_average,
+								&ewl, &err_simul );
 		hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 		/* Add 'kernel termination' event to the wait list. */
@@ -1296,7 +1317,8 @@ static inline void simulate( const HBKernels_t *const krnl, const HBGlobalWorkSi
 		/* Read unhappiness. */
 
 		evt_rdwr = ccl_buffer_enqueue_read( dev_buff->unhapp_average, oclobj->queue, HB_NON_BLOCK, 0,
-								bufsz->unhapp_average, hst_buff->unhapp_average, &ewl, &err_simul );
+								bufsz->unhapp_average, hst_buff->unhapp_average,
+								&ewl, &err_simul );
 		hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 		/* Add read termination event to the wait list. */
@@ -1334,7 +1356,7 @@ int main ( int argc, char *argv[] )
 {
 	FILE *hbResultFile = NULL;
 
-	Parameters_t params;		/* Host data; simulation parameters. */
+	Parameters_t params;					/* Host data; simulation parameters. */
 
 
 	OCLObjects_t oclobj = { NULL, NULL, NULL, NULL };	/* OpenCL related objects: context, device, queue, program. */
@@ -1343,11 +1365,11 @@ int main ( int argc, char *argv[] )
 	HBGlobalWorkSizes_t gws = { {0}, {0}, {0}, {0}, {0}, {0}, {0, 0}, {0}, {0} };	/* Global work sizes for all kernels. */
 	HBLocalWorkSizes_t  lws = { {0}, {0}, {0}, {0}, {0}, {0}, {0, 0}, {0}, {0} };	/* Local work sizes for all kernels. */
 
-	HBHostBuffers_t hst_buff = { NULL, /*NULL, NULL, NULL, { NULL, NULL }, NULL, NULL,*/ NULL };	/* Buffers for the host. */
-	HBDeviceBuffers_t dev_buff = { NULL, NULL, NULL, NULL, { NULL, NULL }, NULL, NULL, NULL };	/* Buffers for the device. */
-	HBBuffersSize_t bufsz;										/* Buffers sizes. */
+	HBHostBuffers_t hst_buff = { NULL, /*NULL, NULL, NULL, { NULL, NULL }, NULL, NULL,*/ NULL };	/* Host buffers. */
+	HBDeviceBuffers_t dev_buff = { NULL, NULL, NULL, NULL, { NULL, NULL }, NULL, NULL, NULL };	/* Device buffers. */
+	HBBuffersSize_t bufsz;										/* Buffer sizes. */
 
-	CCLErr *err_main = NULL;	/* Error reporting object, from GLib. */
+	CCLErr *err_main = NULL;				/* Error reporting object. */
 
 
 	getSimulParameters( &params, argc, argv, &err_main );

@@ -16,13 +16,14 @@
  * */
 
 
+
 /**
  * from:
- * http://www.reedbeta.com/blog/2013/01/12/quick-and-easy-gpu-random-numbers-in-
- *		d3d11/
+ * http://www.reedbeta.com/blog/2013/01/12/quick-and-easy-gpu-random-numbers-in-d3d11/
  * http://http.developer.nvidia.com/GPUGems3/gpugems3_ch37.html
- * https://math.stackexchange.com/questions/337782/pseudo-random-number-
- *		generation-on-the-gpu
+ * https://math.stackexchange.com/questions/337782/pseudo-random-number-generation-on-the-gpu
+ * https://blogs.unity3d.com/2015/01/07/a-primer-on-repeatable-random-numbers/
+ * https://gist.github.com/badboy/6267743
  * */
 
 /**
@@ -66,7 +67,7 @@
 #define FIND_MIN_TEMPERATURE	0x00ff00ff
 
 /* Number of neighboring cell that surround the agent's position. */
-#define NUM_NEIGHBOURS	8
+#define NUM_NEIGHBOURS		8
 
 
 /*
@@ -91,9 +92,9 @@
 
 #define BUG_NEW( uint_reg ) uint_reg = BUG
 
-#define SET_BUG( uint_reg ) uint_reg = (uint_reg & 0xff00ff00) | BUG
-#define SET_BUG_IDEAL_TEMPERATURE( uint_reg, value ) uint_reg = (uint_reg & 0x00ffffff) | ((value) << 24)
-#define SET_BUG_OUTPUT_HEAT( uint_reg, value ) uint_reg = (uint_reg & 0xffff00ff) | ((value) << 8)
+#define SET_BUG( uint_reg ) uint_reg = ((uint_reg & 0xff00ff00) | BUG)
+#define SET_BUG_IDEAL_TEMPERATURE( uint_reg, value ) uint_reg = ((uint_reg & 0x00ffffff) | ((value) << 24))
+#define SET_BUG_OUTPUT_HEAT( uint_reg, value ) uint_reg = ((uint_reg & 0xffff00ff) | ((value) << 8))
 
 #define SET_BUG_AT_REST( uint_reg ) uint_reg = (uint_reg & 0xffffff00)
 #define SET_BUG_TO_MOVE( uint_reg ) uint_reg = ((uint_reg & 0xffffff00) | 0x000000aa)
@@ -102,8 +103,8 @@
 #define HAS_BUG( uint_reg ) ((uint_reg) != EMPTY_CELL)
 #define HAS_NO_BUG( uint_reg ) ((uint_reg) == EMPTY_CELL)
 
-#define GET_BUG_IDEAL_TEMPERATURE( uint_reg ) ( ((uint_reg) & 0xff000000) >> 24 )
-#define GET_BUG_OUTPUT_HEAT( uint_reg ) ( ((uint_reg) & 0x0000ff00) >> 8 )
+#define GET_BUG_IDEAL_TEMPERATURE( uint_reg ) (((uint_reg) & 0xff000000) >> 24)
+#define GET_BUG_OUTPUT_HEAT( uint_reg ) (((uint_reg) & 0x0000ff00) >> 8)
 
 #define BUG_HAS_MOVED( uint_reg ) ((uint_reg & 0x00ff00ff) != BUG)
 
@@ -126,7 +127,7 @@
  * @param a Integer numerator.
  * @param b Integer denominator.
  * */
-#define DIV_CEIL( a, b ) ( ((a) + (b) - 1) / (b) )
+#define DIV_CEIL( a, b ) (((a) + (b) - 1) / (b))
 
 /**
  * @brief Compute the next multiple of a given divisor which is equal or larger
@@ -181,8 +182,7 @@ inline uint rand_xorShift32( __global uint *rng_state )
  * */
 inline double randomFloat( uint min, uint max, __global uint *rng_state )
 {
-	return (max - min) * (double) rand_xorShift32( rng_state )
-						* ( 1.0 / 4294967296.0 ) + min;
+	return (max - min) * (double) rand_xorShift32( rng_state ) * ( 1.0 / 4294967296.0 ) + min;
 }
 
 
@@ -193,8 +193,7 @@ inline double randomFloat( uint min, uint max, __global uint *rng_state )
  * */
 inline uint randomInt( uint min, uint max, __global uint *rng_state )
 {
-	return (max - min) * (double) rand_xorShift32( rng_state )
-						* ( 1.0 / 4294967296.0 ) + min;
+	return (max - min) * (double) rand_xorShift32( rng_state ) * ( 1.0 / 4294967296.0 ) + min;
 }
 
 
@@ -208,38 +207,30 @@ inline uint randomInt( uint min, uint max, __global uint *rng_state )
  * World is a vector mapped to a matrix growing from (0,0) toward NorthEast,
  * that is, first cartesian quadrant.
  * */
-inline uint best_Free_Neighbour( int todo, __global float *heat_map,
-			__global uint *swarm_map, __private uint bug_locus,
-			__global uint *rng_state )
+inline uint best_Free_Neighbour( int todo, __global float *heat_map, __global uint *swarm_map, __private uint bug_locus,
+					__global uint *rng_state )
 {
-	/* Agent vector position into the world / 2D position. */
-	__private const uint rc = bug_locus / WORLD_WIDTH;    /* Central row. */
-	__private const uint cc = bug_locus % WORLD_WIDTH;    /* Central col. */
+	/* Agent vector position in the world to 2D position. */
+	__private const uint rc = bug_locus / WORLD_WIDTH;    			/* Central row. */
+	__private const uint cc = bug_locus % WORLD_WIDTH;			/* Central col. */
 
 	/* Neighbouring rows and columns. */
+	__private const uint rn = (rc + 1) % WORLD_HEIGHT;			/* Row at North.   */
+	__private const uint rs = (rc + WORLD_HEIGHT - 1) % WORLD_HEIGHT;	/* Row at South.   */
+	__private const uint ce = (cc + 1) % WORLD_WIDTH;			/* Column at East. */
+	__private const uint cw = (cc + WORLD_WIDTH - 1) % WORLD_WIDTH;		/* Column at West. */
 
-	/* Row at North.   */
-	__private const uint rn = (rc + 1) % WORLD_HEIGHT;
-	/* Row at South.   */
-	__private const uint rs = (rc + WORLD_HEIGHT - 1) % WORLD_HEIGHT;
-	/* Column at East. */
-	__private const uint ce = (cc + 1) % WORLD_WIDTH;
-	/* Column at West. */
-	__private const uint cw = (cc + WORLD_WIDTH - 1) % WORLD_WIDTH;
+	__private uint2 best;				/* IMPORTANT: best.s0 is position, best.s1 is temperature. */
+	__private uint2 neighbour[ NUM_NEIGHBOURS ];	/* neighbour[..].s0 is position, neighbour[..].s1 is temperature. */
 
-	/* IMPORTANT best.s0 is position, best.s1 is temperature. */
-	__private uint2 best;
-	/* neighbour[..].s0 is position, neighbour[..].s1 is temperature. */
-	__private uint2 neighbour[ NUM_NEIGHBOURS ];
-	/* To index neighbour's. Randomly picks the first free neighbouring cell. */
+	/* To index neighbours. Randomly picks the first free neighbouring cell. */
 	__private uint NEIGHBOUR_IDX[ NUM_NEIGHBOURS ] = {SW, S, SE, W, E, NW, N, NE};
 
 
 
 	/*
-	 * Fisher-Yates shuffle algorithm to shuffle an index vector so we can
-	 * pick a random free neighbour by checking each by index until find a
-	 * first free.
+	   Fisher-Yates shuffle algorithm to shuffle an index vector so we can pick a random free neighbour by
+	   checking each by index until find a first free.
 	 * */
 	for (uint i = 0; i < NUM_NEIGHBOURS; i++)
 	{
@@ -253,17 +244,15 @@ inline uint best_Free_Neighbour( int todo, __global float *heat_map,
 	}
 
 
-
-	/* Compute back the vector positions. Used on both, best */
-	/* location and random location.                         */
-	neighbour[ SW ].s0 = rs * WORLD_WIDTH + cw;  /* SW neighbour position. */
-	neighbour[ S  ].s0 = rs * WORLD_WIDTH + cc;  /* S  neighbour position. */
-	neighbour[ SE ].s0 = rs * WORLD_WIDTH + ce;  /* SE neighbour position. */
-	neighbour[ W  ].s0 = rc * WORLD_WIDTH + cw;  /* W  neighbour position. */
-	neighbour[ E  ].s0 = rc * WORLD_WIDTH + ce;  /* E  neighbour position. */
-	neighbour[ NW ].s0 = rn * WORLD_WIDTH + cw;  /* NW neighbour position. */
-	neighbour[ N  ].s0 = rn * WORLD_WIDTH + cc;  /* N  neighbour position. */
-	neighbour[ NE ].s0 = rn * WORLD_WIDTH + ce;  /* NE neighbour position. */
+	/* Compute back the vector positions. Used on both, best location and random location. */
+	neighbour[ SW ].s0 = rs * WORLD_WIDTH + cw;	/* SW neighbour position in the vector. */
+	neighbour[ S  ].s0 = rs * WORLD_WIDTH + cc;	/* S  neighbour position in the vector. */
+	neighbour[ SE ].s0 = rs * WORLD_WIDTH + ce;	/* SE neighbour position in the vector. */
+	neighbour[ W  ].s0 = rc * WORLD_WIDTH + cw;	/* W  neighbour position in the vector. */
+	neighbour[ E  ].s0 = rc * WORLD_WIDTH + ce;	/* E  neighbour position in the vector. */
+	neighbour[ NW ].s0 = rn * WORLD_WIDTH + cw;	/* NW neighbour position in the vector. */
+	neighbour[ N  ].s0 = rn * WORLD_WIDTH + cc;	/* N  neighbour position in the vector. */
+	neighbour[ NE ].s0 = rn * WORLD_WIDTH + ce;	/* NE neighbour position in the vector. */
 
 	if (todo != FIND_ANY_FREE)
 	{
@@ -337,8 +326,7 @@ inline uint best_Free_Neighbour( int todo, __global float *heat_map,
 		}
 
 		/* Return, if bug is already in the best local or if new best local is bug free, */
-		if ((best.s0 == bug_locus)
-		    || HAS_NO_BUG( swarm_map[ best.s0 ] )) return best.s0;
+		if ((best.s0 == bug_locus) || HAS_NO_BUG( swarm_map[ best.s0 ] )) return best.s0;
 
 	} /* end_if (todo != FIND_ANY_FREE) */
 
@@ -452,7 +440,8 @@ __kernel void init_swarm( __global uint *swarm_bugPosition, __global uint *swarm
 	if (bug_id >= BUGS_NUMBER) return;
 
 
-	bug_ideal_temperature = (ushort) randomInt( BUGS_TEMPERATURE_MIN_IDEAL,	BUGS_TEMPERATURE_MAX_IDEAL, &rng_state[ bug_id ] );
+	bug_ideal_temperature = (ushort) randomInt( BUGS_TEMPERATURE_MIN_IDEAL,
+							BUGS_TEMPERATURE_MAX_IDEAL, &rng_state[ bug_id ] );
 
 	bug_output_heat = (ushort) randomInt( BUGS_HEAT_MIN_OUTPUT, BUGS_HEAT_MAX_OUTPUT, &rng_state[ bug_id ] );
 
@@ -535,28 +524,23 @@ __kernel void prepare_step_report( __global uint *bug_step_retry )
 /**
  * Perform a bug movement in the world.
  *
- * Netlogo completely separates the report of the 'best' / 'random' location,
- * from the actual bug movement. Only when perform 'bug-move', the availability
- * (status) of the reported location is checked, so an alternate free location,
- * if exists, is computed if necessary.
+ * Netlogo completely separates the report of the 'best' / 'random' location, from the actual bug movement. Only when
+ * perform 'bug-move', the availability (status) of the reported location is checked, so an alternate free location, if
+ * exists, is computed if necessary.
  *
- * This GPU version of the 'bug-move' a.k.a 'bug_step', uses the auxiliary
- * function find_Best_Neighbour(..), that does both at the same time, it checks
- * for the 'winner', a location with max/min temperature that is also free of
- * bugs, or 'any random' free location.
+ * This GPU version of the 'bug-move' a.k.a 'bug_step', uses the auxiliary function find_Best_Neighbour(..), that does
+ * both at the same time, it checks for the 'winner', a location with max/min temperature that is also free of bugs, or
+ * 'any random' free location.
  *
- * The function best_Free_Neighbour(..) does its best to mimic netlogo behavior,
- * by packing the location report and the availability check into the same
- * function. When executed in serie, the returned result is guaranted since
- * only one bug is processed at a time.
+ * The function best_Free_Neighbour(..) does its best to mimic netlogo behavior, by packing the location report and the
+ * availability check into the same function. When executed in serie, the returned result is guaranted since only one
+ * bug is processed at a time.
  *
- * However the paralell execution in GPU means that a previously free location
- * may become unavailable, so it is required a second call to the same function,
- * best_Free_Neighbour(..), this time looking just for any free neighbour (as
- * if a random moving chance is taking place).
- * A second call to the the function may be necessary to exactly mimic Netlogo's
- * behavior, that is, search for a new free location, after the previous one
- * become occupied by a bug, setted by a concurrent thread.
+ * However the paralell execution in GPU means that a previously free location may become unavailable, so it is required
+ * a second call to the same function, best_Free_Neighbour(..), this time looking just for any free neighbour (as if a
+ * random moving chance is taking place).
+ * A second call to the the function may be necessary to exactly mimic Netlogo's behavior, that is, search for a new free
+ * location, after the previous one become occupied by a bug, setted by a concurrent thread.
  * So, in parallel execution, a 2-step operation may be required.
  * */
 __kernel void bug_step(	__global uint *swarm_bugPosition, __global uint *swarm_map, __global float *heat_map,
@@ -584,9 +568,8 @@ __kernel void bug_step(	__global uint *swarm_bugPosition, __global uint *swarm_m
 
 	/*
 	   Get a private copy of the bug while keeping the original in the swarm.
-
-	   Until this bug resolves his movement, the original one (with original
-	   status) and his position is keept in swarm_map and swarm_bugPosition.
+	   Until this bug resolves his movement, the original one with his original status and his position
+	   is keept in swarm_map and swarm_bugPosition.
 	 * */
 	bug = swarm_map[ bug_locus ];
 
@@ -636,14 +619,15 @@ __kernel void bug_step(	__global uint *swarm_bugPosition, __global uint *swarm_m
 	/*
 		Find the best place for the bug to go. Tricky stuff.
 
-		In order to implement netlogo approach, WITHOUT branching in OpenCL kernel, that is (in netlogo order), to compute:
+		In order to implement netlogo approach, WITHOUT branching in OpenCL kernel, that is (in netlogo order),
+		to compute:
 		1) random-move-chance,
 		2) best-patch for (temp <  ideal_temp) (when bug is COLD),
 		3) best-patch for (temp >= ideal_temp) (when bug is HOT),
 		the OpenCl kernel select(...) function must be used twice.
 
-		A variable is used to hold what to do, (1), (2) or (3). However	the order must be reversed since (1), when happen, takes
-		precedence over	(2) or (3), whatever (2) XOR (3) is true or not.
+		A variable is used to hold what to do, (1), (2) or (3). However	the order must be reversed since (1),
+		when happen, takes precedence over (2) or (3), whatever (2) XOR (3) is true or not.
 
 		REMEMBER:  select(a, b, c), implements:	(c) ? b : a
 	*/
@@ -834,9 +818,8 @@ __kernel void comp_world_heat( __global float *heat_map, __global float *heat_bu
 /*
  *
  */
-__kernel void unhappiness_step1_reduce( __global float *unhappiness,
-					__local float *partial_sums,
-					__global float *unhapp_reduced )
+__kernel void unhappiness_step1_reduce( __global float *unhappiness, __local float *partial_sums,
+						__global float *unhapp_reduced )
 {
 	const uint gid = get_global_id( 0 );
 	const uint lid = get_local_id( 0 );
@@ -909,8 +892,7 @@ __kernel void unhappiness_step1_reduce( __global float *unhappiness,
 
 
 
-__kernel void unhappiness_step2_average( __global float *unhapp_reduced,
-						__local float *partial_sums,
+__kernel void unhappiness_step2_average( __global float *unhapp_reduced, __local float *partial_sums,
 						__global float *unhapp_average )
 {
 	__private uint iter;
@@ -920,14 +902,7 @@ __kernel void unhappiness_step2_average( __global float *unhapp_reduced,
 	const uint group_size = get_local_size( 0 );
 
 
-	/* Load partial sum in local memory */
-//	if (lid < REDOX_NUM_WORKGROUPS)
-//		partial_sums[ lid ] = unhappiness[ lid ];
-//	else
-//		partial_sums[ lid ] = 0;
-
-	partial_sums[ lid ] =
-		select( 0.0f, unhapp_reduced[ lid ], lid < REDUCE_NUM_WORKGROUPS );
+	partial_sums[ lid ] = select( 0.0f, unhapp_reduced[ lid ], lid < REDUCE_NUM_WORKGROUPS );
 
 	barrier( CLK_LOCAL_MEM_FENCE );
 
@@ -940,7 +915,7 @@ __kernel void unhappiness_step2_average( __global float *unhapp_reduced,
 		barrier( CLK_LOCAL_MEM_FENCE );
 	}
 
-	/* Compute average and put final result in global memory. */
+	/* Compute average and store final result in global memory. */
 	if (lid == 0) {
 		*unhapp_average = partial_sums[ 0 ] / BUGS_NUMBER;
 	}
