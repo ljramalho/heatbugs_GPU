@@ -855,7 +855,7 @@ static inline void getKernels( HBKernels_t *const krnl, HBGlobalWorkSizes_t *con
 	krnl->unhapp_stp1_reduce = ccl_kernel_new( oclobj->prg, KRNL_NAME__UNHAPP_S1_REDUCE, &err_getkernels );
 	hb_if_err_propagate_goto( err, err_getkernels, error_handler );
 
-	/* Note, gws->unhapp_stp1_reduce and lws->unhapp_stp1_reduce were previously computed in function 'getOCLObjects(...)'. */
+	/* Note that gws->unhapp_stp1_reduce and lws->unhapp_stp1_reduce were previously computed in function 'getOCLObjects(...)'. */
 
 	// printf( "[ kernel ]: unhapp_stp1_reduce.\n    '-> bugs_num = %zu; gws = %zu; lws = %zu\n", params->bugs_number, gws->unhapp_stp1_reduce[0], lws->unhapp_stp1_reduce[0] );
 
@@ -867,7 +867,7 @@ static inline void getKernels( HBKernels_t *const krnl, HBGlobalWorkSizes_t *con
 	krnl->unhapp_stp2_average = ccl_kernel_new( oclobj->prg, KRNL_NAME__UNHAPP_S2_AVERAGE, &err_getkernels );
 	hb_if_err_propagate_goto( err, err_getkernels, error_handler );
 
-	/* The following values for gws and lws must be the ones that allow the final reduction. There will be only one workgroup. */
+	/* The values for gws and lws must be the ones that allow the final reduction. There will be only one workgroup. */
 	gws->unhapp_stp2_average[ 0 ] = lws->unhapp_stp1_reduce[ 0 ];
 	lws->unhapp_stp2_average[ 0 ] = lws->unhapp_stp1_reduce[ 0 ];
 

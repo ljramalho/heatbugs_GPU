@@ -199,13 +199,12 @@ inline uint randomInt( uint min, uint max, __global uint *rng_state )
 
 
 /*
- * It returns either:
+ * For any agent it returns either:
  *		1- A free location with best (MAX Temperature | MIN Temperature).
  *		2- Any random free location.
  *		3- Self location.
- * for any agent.
- * World is a vector mapped to a matrix growing from (0,0) toward NorthEast,
- * that is, first cartesian quadrant.
+ *
+ * World is a vector mapped to a matrix growing from (0,0) toward NorthEast, that is, first cartesian quadrant.
  * */
 inline uint best_Free_Neighbour( int todo, __global float *heat_map, __global uint *swarm_map, __private uint bug_locus,
 					__global uint *rng_state )
@@ -737,77 +736,74 @@ __kernel void bug_step(	__global uint *swarm_bugPosition, __global uint *swarm_m
 
 __kernel void comp_world_heat( __global float *heat_map, __global float *heat_buffer )
 {
-	float heat = 0;
-	uint pos;
-	uint ln, ls, ce, cw;	/* Line at North/South, Column at East/West. */
+	__private const uint cc = get_global_id( 0 );	/* Column at Center. */
+	__private const uint rc = get_global_id( 1 );	/* Row at Center.   */
 
-	const uint cc = get_global_id( 0 );	/* Column at Center. */
-	const uint lc = get_global_id( 1 );	/* Line at Center.   */
-
-	if (lc >= WORLD_HEIGHT || cc >= WORLD_WIDTH) return;
+	if (rc >= WORLD_HEIGHT || cc >= WORLD_WIDTH) return;
 
 
-	/* Compute required coodinates. */
-	ln = (lc + 1) % WORLD_HEIGHT;			/* Line at North.   */
-	ls = (lc + WORLD_HEIGHT - 1) % WORLD_HEIGHT;	/* Line at South.   */
-	ce = (cc + 1) % WORLD_WIDTH;			/* Column at East.  */
-	cw = (cc + WORLD_WIDTH - 1) % WORLD_WIDTH;	/* Columns at West. */
+	/* Compute required neighbouring coodinates. */
+	__private const uint rn = (rc + 1) % WORLD_HEIGHT;			/* Row at North.    */
+	__private const uint rs = (rc + WORLD_HEIGHT - 1) % WORLD_HEIGHT;	/* Row at South.    */
+	__private const uint ce = (cc + 1) % WORLD_WIDTH;			/* Column at East.  */
+	__private const uint cw = (cc + WORLD_WIDTH - 1) % WORLD_WIDTH;		/* Columns at West. */
+
+	__private uint pos;
+
+	__private float heat = 0.0f;
 
 
-	/* Compute Diffusion */
+	/** Compute Diffusion */
 
-	/* NW */
-	pos = ln * WORLD_WIDTH + cw;
-	heat += heat_map[pos];
-
-	/* N  */
-	pos = ln * WORLD_WIDTH + cc;
-	heat += heat_map[pos];
-
-	/* NE */
-	pos = ln * WORLD_WIDTH + ce;
-	heat += heat_map[pos];
-
-	/* W  */
-	pos = lc * WORLD_WIDTH + cw;
-	heat += heat_map[pos];
-
-	/* E  */
-	pos = lc * WORLD_WIDTH + ce;
-	heat += heat_map[pos];
+	/* Store heat from neighbouring cells. */
 
 	/* SW */
-	pos = ls * WORLD_WIDTH + cw;
-	heat += heat_map[pos];
+	pos = rs * WORLD_WIDTH + cw;
+	heat = heat + heat_map[ pos ];
 
 	/* S  */
-	pos = ls * WORLD_WIDTH + cc;
-	heat += heat_map[pos];
+	pos = rs * WORLD_WIDTH + cc;
+	heat = heat + heat_map[ pos ];
 
 	/* SE */
-	pos = ls * WORLD_WIDTH + ce;
-	heat += heat_map[pos];
+	pos = rs * WORLD_WIDTH + ce;
+	heat = heat + heat_map[ pos ];
 
-	/* Get the 8th part of diffusion percentage of all neighbour cells. */
+	/* W  */
+	pos = rc * WORLD_WIDTH + cw;
+	heat = heat + heat_map[ pos ];
+
+	/* E  */
+	pos = rc * WORLD_WIDTH + ce;
+	heat = heat + heat_map[ pos ];
+
+	/* NW */
+	pos = rn * WORLD_WIDTH + cw;
+	heat = heat + heat_map[ pos ];
+
+	/* N  */
+	pos = rn * WORLD_WIDTH + cc;
+	heat = heat + heat_map[ pos ];
+
+	/* NE */
+	pos = rn * WORLD_WIDTH + ce;
+	heat = heat + heat_map[ pos ];
+
+
+	/* Get the 8th part of diffusion percentage from all neighbour cells. */
 	heat = heat * WORLD_DIFFUSION_RATE / 8;
 
 	/* Add cell's remaining heat. */
-	pos = lc * WORLD_WIDTH + cc;
-	heat += heat_map[pos] * (1 - WORLD_DIFFUSION_RATE);
-
-
-	barrier( CLK_GLOBAL_MEM_FENCE );	/* TODO: Is it needed? */
-
+	pos = rc * WORLD_WIDTH + cc;
+	heat = heat + heat_map[ pos ] * (1 - WORLD_DIFFUSION_RATE);
 
 	/* Compute Evaporation */
-
 	heat = heat * (1 - WORLD_EVAPORATION_RATE);
 
 
 	/* Double buffer it. */
 	heat_buffer[pos] = heat;
 
-	barrier( CLK_GLOBAL_MEM_FENCE );	/* TODO: Is it needed? */
 
 	return;
 }
@@ -827,14 +823,13 @@ __kernel void unhappiness_step1_reduce( __global float *unhappiness, __local flo
 	const uint group_size = get_local_size( 0 );
 
 	__private uint serialCount, index, iter;
+
 	__private float sum = 0.0f;
 
 	/*
-	   The size of vector unhappiness is the number of bugs (BUGS_NUMBER).
-	   So we must take care of both cases, when BUGS_NUMBER > global_size,
-	   and when global_size > BUGS_NUMBER.
-	   This is what happen in the next loop ('sum' is private to each
-	   workitem)...
+	   The size of vector unhappiness is the number of bugs (BUGS_NUMBER), so we must take care of both cases, when
+	   BUGS_NUMBER > global_size, and when global_size > BUGS_NUMBER.
+	   This is what happen in the next loop ('sum' is private to each workitem)...
 
 	   When: (BUGS_NUMBER < global_size) -> serialCount = 1
 	   	sum[0 .. BUGS_NUMBER - 1] = unhappiness[0 .. BUGS_NUMBER - 1]
@@ -844,11 +839,9 @@ __kernel void unhappiness_step1_reduce( __global float *unhappiness, __local flo
 	   	sum[0 .. global_size - 1] = unhappiness[0 .. global_size - 1]
 
 	   When: (global_size < BUGS_NUMBER < 2*global_size) -> serialCount = 2
-	   	sum[0 .. BUGS_NUMBER - global_size - 1] =
-	   		unhappiness[0 .. BUGS_NUMBER - global_size - 1]
-	   		+ unhappiness[global_size .. BUGS_NUMBER - 1]
-	   	sum[BUGS_NUMBER - global_size .. global_size - 1] =
-	   		unhappiness[BUGS_NUMBER - global_size .. global_size - 1]
+	   	sum[0 .. BUGS_NUMBER - global_size - 1] = unhappiness[0 .. BUGS_NUMBER - global_size - 1]
+	   							+ unhappiness[global_size .. BUGS_NUMBER - 1]
+	   	sum[BUGS_NUMBER - global_size .. global_size - 1] = unhappiness[BUGS_NUMBER - global_size .. global_size - 1]
 
 	   Where each indexed sum, is a work-item | lid, private variable 'sum'.
 	*/
@@ -860,25 +853,24 @@ __kernel void unhappiness_step1_reduce( __global float *unhappiness, __local flo
 	{
 		index = iter * global_size + gid;
 
-		/* For workitems out of range, sum = 0.0 */
+		/* If workitem is out of range. */
 		if (index < BUGS_NUMBER)
 			sum += unhappiness[ index ];
 	}
 
-	/* All workitems (including out of range (sum = 0.0), store */
-	/* 'sum' in local memory.                                   */
+	/* All workitems (including out of range (sum = 0.0), store 'sum' in local memory. */
 	partial_sums[ lid ] = sum;
 
-	/* Wait for all workitems to perform previous operations.   */
+	/* Wait for all workitems to perform previous operations before proceed with local group sums.   */
 	barrier( CLK_LOCAL_MEM_FENCE );
 
 
 	/* Reduce. */
 	for (iter = group_size / 2; iter > 0; iter >>= 1)
 	{
-		if (lid < iter)	{
+		if (lid < iter)
 			partial_sums[ lid ] += partial_sums[ lid + iter ];
-		}
+
 		barrier( CLK_LOCAL_MEM_FENCE );
 	}
 
@@ -909,9 +901,9 @@ __kernel void unhappiness_step2_average( __global float *unhapp_reduced, __local
 	/* Further reduce. */
 	for (iter = group_size / 2; iter > 0; iter >>= 1)
 	{
-		if (lid < iter)	{
+		if (lid < iter)
 			partial_sums[ lid ] += partial_sums[ lid + iter ];
-		}
+
 		barrier( CLK_LOCAL_MEM_FENCE );
 	}
 
