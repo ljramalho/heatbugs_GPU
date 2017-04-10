@@ -114,10 +114,11 @@ typedef struct hb_kernels {
 	CCLKernel *init_swarm;				/* Initiate the world of bugs. */
 	CCLKernel *prepare_bug_step;			/* Set the bugs move state, to be used in the new iteration. */
 	CCLKernel *prepare_step_report;			/* Reset the 'bug step retry' report flag. */
-	CCLKernel *bug_step;				/* Perform a new bug movement. */
+	CCLKernel *bug_step_best;			/* Try to move the bug to the best place if the place is free. */
+	CCLKernel *bug_step_any_free;			/* Try to move the bug to a random free place. */
 	CCLKernel *comp_world_heat;			/* Compute world heat, diffusion then evaporation. */
-	CCLKernel *unhapp_stp1_reduce;			/* Reduce (sum) the unhappiness vector. */
-	CCLKernel *unhapp_stp2_average;			/* Further reduce the unhappiness vector and compute average. */
+	CCLKernel *unhapp_step1_reduce;			/* Reduce (sum) the unhappiness vector. */
+	CCLKernel *unhapp_step2_average;		/* Further reduce the unhappiness vector and compute average. */
 } HBKernels_t;
 
 
@@ -128,10 +129,11 @@ typedef struct hb_global_work_sizes {
 	size_t init_swarm[ HB_DIMS_1 ];
 	size_t prepare_bug_step[ HB_DIMS_1 ];
 	size_t prepare_step_report[ HB_DIMS_1 ];
-	size_t bug_step[ HB_DIMS_1 ];
+	size_t bug_step_best[ HB_DIMS_1 ];
+	size_t bug_step_any_free[ HB_DIMS_1 ];
 	size_t comp_world_heat[ HB_DIMS_2 ];
-	size_t unhapp_stp1_reduce[ HB_DIMS_1 ];
-	size_t unhapp_stp2_average[ HB_DIMS_1 ];
+	size_t unhapp_step1_reduce[ HB_DIMS_1 ];
+	size_t unhapp_step2_average[ HB_DIMS_1 ];
 } HBGlobalWorkSizes_t;
 
 
@@ -142,10 +144,11 @@ typedef struct hb_local_work_sizes {
 	size_t init_swarm[ HB_DIMS_1 ];
 	size_t prepare_bug_step[ HB_DIMS_1 ];
 	size_t prepare_step_report[ HB_DIMS_1 ];
-	size_t bug_step[ HB_DIMS_1 ];
+	size_t bug_step_best[ HB_DIMS_1 ];
+	size_t bug_step_any_free[ HB_DIMS_1 ];
 	size_t comp_world_heat[ HB_DIMS_2 ];
-	size_t unhapp_stp1_reduce[ HB_DIMS_1 ];
-	size_t unhapp_stp2_average[ HB_DIMS_1 ];
+	size_t unhapp_step1_reduce[ HB_DIMS_1 ];
+	size_t unhapp_step2_average[ HB_DIMS_1 ];
 } HBLocalWorkSizes_t;
 
 
@@ -472,7 +475,7 @@ static inline void getOCLObjects( OCLObjects_t *const oclobj, HBGlobalWorkSizes_
 	   to the kernel as external defines.
 	 * */
 	ccl_kernel_suggest_worksizes( NULL, oclobj->dev, HB_DIMS_1, &params->bugs_number,
-						gws->unhapp_stp1_reduce, lws->unhapp_stp1_reduce, &err_get_oclobj );
+						gws->unhapp_step1_reduce, lws->unhapp_step1_reduce, &err_get_oclobj );
 	hb_if_err_propagate_goto( err, err_get_oclobj, error_handler );
 
 	/*
@@ -482,7 +485,7 @@ static inline void getOCLObjects( OCLObjects_t *const oclobj, HBGlobalWorkSizes_
 	   This work size is computed here because we need his value (reduce_num_workgroups) to be sent to the kernel
 	   as external defines.
 	 * */
-	gws->unhapp_stp1_reduce[ 0 ] = MIN( SQUARE( lws->unhapp_stp1_reduce[ 0 ] ), gws->unhapp_stp1_reduce[ 0 ] );
+	gws->unhapp_step1_reduce[ 0 ] = MIN( SQUARE( lws->unhapp_step1_reduce[ 0 ] ), gws->unhapp_step1_reduce[ 0 ] );
 
 
 	/*
@@ -491,7 +494,7 @@ static inline void getOCLObjects( OCLObjects_t *const oclobj, HBGlobalWorkSizes_
 	   'cl_compiler_opts'.
 	 * */
 
-	params->reduce_num_workgroups = gws->unhapp_stp1_reduce[ 0 ] / lws->unhapp_stp1_reduce[ 0 ];
+	params->reduce_num_workgroups = gws->unhapp_step1_reduce[ 0 ] / lws->unhapp_step1_reduce[ 0 ];
 
 	sprintf( cl_compiler_opts, cl_compiler_opts_template,
 				params->seed,
@@ -511,8 +514,8 @@ static inline void getOCLObjects( OCLObjects_t *const oclobj, HBGlobalWorkSizes_
 
 	/* Build CL Program. */
 	ccl_program_build( oclobj->prg, cl_compiler_opts, &err_get_oclobj );
-	// const char * build_log =  ccl_program_get_build_log(oclobj->prg, NULL);
-	// printf("%s", build_log);
+	//const char * build_log =  ccl_program_get_build_log(oclobj->prg, NULL);
+	//printf("%s", build_log);
 	hb_if_err_propagate_goto( err, err_get_oclobj, error_handler );
 
 
@@ -822,17 +825,28 @@ static inline void getKernels( HBKernels_t *const krnl, HBGlobalWorkSizes_t *con
 
 
 
-	/** bug_step: kernel.
-	    Compute a feasible movement for each bug. */
+	/** bug_step_best: kernel.
+	    Perform a feasible movement for best place for each bug. */
 
-	krnl->bug_step = ccl_kernel_new( oclobj->prg, KRNL_NAME__BUG_STEP, &err_getkernels );
+	krnl->bug_step_best = ccl_kernel_new( oclobj->prg, KRNL_NAME__BUG_STEP_BEST, &err_getkernels );
 	hb_if_err_propagate_goto( err, err_getkernels, error_handler );
 
-	ccl_kernel_suggest_worksizes( krnl->bug_step, oclobj->dev, HB_DIMS_1, &params->bugs_number,
-						gws->bug_step, lws->bug_step, &err_getkernels );
+	ccl_kernel_suggest_worksizes( krnl->bug_step_best, oclobj->dev, HB_DIMS_1, &params->bugs_number,
+						gws->bug_step_best, lws->bug_step_best, &err_getkernels );
 	hb_if_err_propagate_goto( err, err_getkernels, error_handler );
 
 	// printf( "[ kernel ]: bug_step.\n    '-> world_size = %zu; gws = %zu; lws = %zu\n", params->bugs_number, gws->bug_step[0], lws->bug_step[0] );
+
+
+
+	/** bug_step_any_free: kernel
+	    Perform a feasible movement for any free place for each bug, in case best place is unavailable. */
+	krnl->bug_step_any_free = ccl_kernel_new( oclobj->prg, KRNL_NAME__BUG_STEP_ANY_FREE, &err_getkernels );
+	hb_if_err_propagate_goto( err, err_getkernels, error_handler );
+
+	ccl_kernel_suggest_worksizes( krnl->bug_step_any_free, oclobj->dev, HB_DIMS_1, &params->bugs_number,
+						gws->bug_step_any_free, lws->bug_step_any_free, &err_getkernels );
+	hb_if_err_propagate_goto( err, err_getkernels, error_handler );
 
 
 
@@ -853,7 +867,7 @@ static inline void getKernels( HBKernels_t *const krnl, HBGlobalWorkSizes_t *con
 	/** unhappiness_step1 reduce: First phase reduce kernel.
 	    First step to compute bug's unhapines average. */
 
-	krnl->unhapp_stp1_reduce = ccl_kernel_new( oclobj->prg, KRNL_NAME__UNHAPP_S1_REDUCE, &err_getkernels );
+	krnl->unhapp_step1_reduce = ccl_kernel_new( oclobj->prg, KRNL_NAME__UNHAPP_S1_REDUCE, &err_getkernels );
 	hb_if_err_propagate_goto( err, err_getkernels, error_handler );
 
 	/* Note that gws->unhapp_stp1_reduce and lws->unhapp_stp1_reduce were previously computed in function 'getOCLObjects(...)'. */
@@ -865,12 +879,12 @@ static inline void getKernels( HBKernels_t *const krnl, HBGlobalWorkSizes_t *con
 	/** unhappiness_step2_average: Second phase average computation kernel.
 	    Compute final reduction and then unhappiness average. */
 
-	krnl->unhapp_stp2_average = ccl_kernel_new( oclobj->prg, KRNL_NAME__UNHAPP_S2_AVERAGE, &err_getkernels );
+	krnl->unhapp_step2_average = ccl_kernel_new( oclobj->prg, KRNL_NAME__UNHAPP_S2_AVERAGE, &err_getkernels );
 	hb_if_err_propagate_goto( err, err_getkernels, error_handler );
 
 	/* The values for gws and lws must be the ones that allow the final reduction. There will be only one workgroup. */
-	gws->unhapp_stp2_average[ 0 ] = lws->unhapp_stp1_reduce[ 0 ];
-	lws->unhapp_stp2_average[ 0 ] = lws->unhapp_stp1_reduce[ 0 ];
+	gws->unhapp_step2_average[ 0 ] = lws->unhapp_step1_reduce[ 0 ];
+	lws->unhapp_step2_average[ 0 ] = lws->unhapp_step1_reduce[ 0 ];
 
 	// printf( "[ kernel ]: unhapp_stp2_average.\n    '-> gws = %zu; lws = %zu\n\n", gws->unhapp_stp2_average[0], lws->unhapp_stp2_average[0] );
 
@@ -916,13 +930,21 @@ static inline void setKernelParameters( const HBKernels_t *const krnl, const HBD
 	/** 'prepare_step_report' kernel arguments. */
 	ccl_kernel_set_arg( krnl->prepare_step_report, 0, dev_buff->bug_step_retry );
 
-	/** 'bug_step' kernel arguments. */
-	ccl_kernel_set_arg( krnl->bug_step, 0, dev_buff->swarm_bugPosition );
-	ccl_kernel_set_arg( krnl->bug_step, 1, dev_buff->swarm_map );
-	/* ccl_kernel_set_arg( krnl->bug_step, 2, dev_buff->heat_map[0] ); */
-	ccl_kernel_set_arg( krnl->bug_step, 3, dev_buff->unhappiness );
-	ccl_kernel_set_arg( krnl->bug_step, 4, dev_buff->bug_step_retry );
-	ccl_kernel_set_arg( krnl->bug_step, 5, dev_buff->rng_state );
+	/** 'bug_step_best' kernel arguments. */
+	ccl_kernel_set_arg( krnl->bug_step_best, 0, dev_buff->swarm_bugPosition );
+	ccl_kernel_set_arg( krnl->bug_step_best, 1, dev_buff->swarm_map );
+	// ccl_kernel_set_arg( krnl->bug_step, 2, dev_buff->heat_map[0] );
+	ccl_kernel_set_arg( krnl->bug_step_best, 3, dev_buff->unhappiness );
+	ccl_kernel_set_arg( krnl->bug_step_best, 4, dev_buff->bug_step_retry );
+	ccl_kernel_set_arg( krnl->bug_step_best, 5, dev_buff->rng_state );
+
+	/** 'bug_step_any_free' kernel arguments. */
+	ccl_kernel_set_arg( krnl->bug_step_any_free, 0, dev_buff->swarm_bugPosition );
+	ccl_kernel_set_arg( krnl->bug_step_any_free, 1, dev_buff->swarm_map );
+	// ccl_kernel_set_arg( krnl->bug_step_any_free, 2, dev_buff->heat_map[0] );
+	ccl_kernel_set_arg( krnl->bug_step_any_free, 3, dev_buff->bug_step_retry );
+	ccl_kernel_set_arg( krnl->bug_step_any_free, 4, dev_buff->rng_state );
+
 
 	/** 'comp_world_heat' kernel arguments. */
 	/* These arguments change in every iteration. They will be set in 'simulate(...) function. */
@@ -931,14 +953,14 @@ static inline void setKernelParameters( const HBKernels_t *const krnl, const HBD
 	//ccl_kernel_set_arg( krnl->comp_world_heat, 1, dev_buff->heat_map[1] );
 
 	/** 'unhappiness_stp1_reduce' kernel arguments. */
-	ccl_kernel_set_arg( krnl->unhapp_stp1_reduce, 0, dev_buff->unhappiness );
-	ccl_kernel_set_arg( krnl->unhapp_stp1_reduce, 1, ccl_arg_local( lws->unhapp_stp1_reduce[ 0 ], cl_float ) );
-	ccl_kernel_set_arg( krnl->unhapp_stp1_reduce, 2, dev_buff->unhapp_reduced );
+	ccl_kernel_set_arg( krnl->unhapp_step1_reduce, 0, dev_buff->unhappiness );
+	ccl_kernel_set_arg( krnl->unhapp_step1_reduce, 1, ccl_arg_local( lws->unhapp_step1_reduce[ 0 ], cl_float ) );
+	ccl_kernel_set_arg( krnl->unhapp_step1_reduce, 2, dev_buff->unhapp_reduced );
 
 	/** 'unhappiness_stp2_average' kernel arguments. */
-	ccl_kernel_set_arg( krnl->unhapp_stp2_average, 0, dev_buff->unhapp_reduced );
-	ccl_kernel_set_arg( krnl->unhapp_stp2_average, 1, ccl_arg_local( lws->unhapp_stp2_average[ 0 ], cl_float ) );
-	ccl_kernel_set_arg( krnl->unhapp_stp2_average, 2, dev_buff->unhapp_average );
+	ccl_kernel_set_arg( krnl->unhapp_step2_average, 0, dev_buff->unhapp_reduced );
+	ccl_kernel_set_arg( krnl->unhapp_step2_average, 1, ccl_arg_local( lws->unhapp_step2_average[ 0 ], cl_float ) );
+	ccl_kernel_set_arg( krnl->unhapp_step2_average, 2, dev_buff->unhapp_average );
 
 	return;
 }
@@ -1167,8 +1189,8 @@ static inline void simulate( const HBKernels_t *const krnl, const HBGlobalWorkSi
 	/* Call reduction first, because initial state does already contain the bug's unhappiness. */
 
 	/* Reduce step 1: */
-	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->unhapp_stp1_reduce, oclobj->queue, HB_DIMS_1, NULL,
-							gws->unhapp_stp1_reduce, lws->unhapp_stp1_reduce,
+	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->unhapp_step1_reduce, oclobj->queue, HB_DIMS_1, NULL,
+							gws->unhapp_step1_reduce, lws->unhapp_step1_reduce,
 							&ewl, &err_simul );
 	hb_if_err_propagate_goto( err, err_simul, error_handler );
 
@@ -1176,8 +1198,8 @@ static inline void simulate( const HBKernels_t *const krnl, const HBGlobalWorkSi
 	ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
 
 	/* Reduce step 2: */
-	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->unhapp_stp2_average, oclobj->queue, HB_DIMS_1, NULL,
-							gws->unhapp_stp2_average, lws->unhapp_stp2_average,
+	evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->unhapp_step2_average, oclobj->queue, HB_DIMS_1, NULL,
+							gws->unhapp_step2_average, lws->unhapp_step2_average,
 							&ewl, &err_simul );
 	hb_if_err_propagate_goto( err, err_simul, error_handler );
 
@@ -1236,6 +1258,19 @@ static inline void simulate( const HBKernels_t *const krnl, const HBGlobalWorkSi
 		ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
 
 
+
+		/** Prepare step report. */
+
+		evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->prepare_step_report, oclobj->queue, HB_DIMS_1, NULL,
+								gws->prepare_step_report, lws->prepare_step_report,
+								&ewl, &err_simul );
+		hb_if_err_propagate_goto( err, err_simul, error_handler );
+
+		/* Add kernel termination event to wait list. */
+		ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
+
+
+
 		/** Prepare bug step. */
 
 		evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->prepare_bug_step, oclobj->queue, HB_DIMS_1, NULL,
@@ -1247,13 +1282,41 @@ static inline void simulate( const HBKernels_t *const krnl, const HBGlobalWorkSi
 		ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
 
 
-		/** Perform bug step. */
+
+		/** Perform bug step for best place. Also compute the new unhappiness vector. */
 
 		/* Set transient argument, using 'bufsel' to use apropriate heat buffer. */
-		ccl_kernel_set_arg( krnl->bug_step, 2, dev_buff->heat_map[ bufsel.secd ] );
+		ccl_kernel_set_arg( krnl->bug_step_best, 2, dev_buff->heat_map[ bufsel.secd ] );
 
-		/* Loop bug_step kernel call, until all bugs resolve their movement status. */
-		do {
+		evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->bug_step_best, oclobj->queue, HB_DIMS_1, NULL,
+								gws->bug_step_best, lws->bug_step_best,
+								&ewl, &err_simul );
+		hb_if_err_propagate_goto( err, err_simul, error_handler );
+
+		/* Add kernel termination event to wait list. */
+		ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
+
+
+
+		/** Check flag 'bug_step_retry' to determine if kernel bug_step_any_free should be called. */
+
+		evt_rdwr = ccl_buffer_enqueue_read( dev_buff->bug_step_retry, oclobj->queue, HB_NON_BLOCK, 0,
+							bufsz->bug_step_retry, hst_buff->bug_step_retry,
+							&ewl, &err_simul );
+		hb_if_err_propagate_goto( err, err_simul, error_handler );
+
+		/* Add read termination event to the wait list. */
+		ccl_event_wait_list_add( &ewl, evt_rdwr, NULL );
+
+		/* Wait for read event completion. */
+		ccl_event_wait( &ewl, &err_simul );
+		hb_if_err_propagate_goto( err, err_simul, error_handler );
+
+
+
+		/* Loop until all bugs resolve their movement. */
+		while (*hst_buff->bug_step_retry)
+		{
 			/** Prepare step report. */
 
 			evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->prepare_step_report, oclobj->queue, HB_DIMS_1, NULL,
@@ -1265,16 +1328,23 @@ static inline void simulate( const HBKernels_t *const krnl, const HBGlobalWorkSi
 			ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
 
 
-			evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->bug_step, oclobj->queue, HB_DIMS_1, NULL,
-								gws->bug_step, lws->bug_step,
-								&ewl, &err_simul );
+
+			/** Perform bug step any free location. */
+
+			/* Set transient argument, using 'bufsel' to use apropriate heat buffer. */
+			ccl_kernel_set_arg( krnl->bug_step_any_free, 2, dev_buff->heat_map[ bufsel.secd ] );
+
+			evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->bug_step_any_free, oclobj->queue, HB_DIMS_1, NULL,
+									gws->bug_step_any_free, lws->bug_step_any_free,
+									&ewl, &err_simul );
 			hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 			/* Add kernel termination event to wait list. */
 			ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
 
 
-			/* Check flag 'bug_step_retry' to determine if kernel should be called again. */
+
+			/** Check flag 'bug_step_retry' to determine if kernel bug_step_any_free should be called. */
 
 			evt_rdwr = ccl_buffer_enqueue_read( dev_buff->bug_step_retry, oclobj->queue, HB_NON_BLOCK, 0,
 								bufsz->bug_step_retry, hst_buff->bug_step_retry,
@@ -1289,17 +1359,15 @@ static inline void simulate( const HBKernels_t *const krnl, const HBGlobalWorkSi
 			hb_if_err_propagate_goto( err, err_simul, error_handler );
 
 			//printf("iter: %lu -- step retry: %u\n", iter_counter, *hst_buff->bug_step_retry);
-		} while (*hst_buff->bug_step_retry);
+		}
 
-
-		/** Reset the bugs status. */
 
 
 		/** Get unhappiness. */
 
 		/* Reduce step 1: */
-		evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->unhapp_stp1_reduce, oclobj->queue, HB_DIMS_1, NULL,
-								gws->unhapp_stp1_reduce, lws->unhapp_stp1_reduce,
+		evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->unhapp_step1_reduce, oclobj->queue, HB_DIMS_1, NULL,
+								gws->unhapp_step1_reduce, lws->unhapp_step1_reduce,
 								&ewl, &err_simul );
 		hb_if_err_propagate_goto( err, err_simul, error_handler );
 
@@ -1307,8 +1375,8 @@ static inline void simulate( const HBKernels_t *const krnl, const HBGlobalWorkSi
 		ccl_event_wait_list_add( &ewl, evt_krnl_exec, NULL );
 
 		/* Reduce step 2: */
-		evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->unhapp_stp2_average, oclobj->queue, HB_DIMS_1, NULL,
-								gws->unhapp_stp2_average, lws->unhapp_stp2_average,
+		evt_krnl_exec = ccl_kernel_enqueue_ndrange( krnl->unhapp_step2_average, oclobj->queue, HB_DIMS_1, NULL,
+								gws->unhapp_step2_average, lws->unhapp_step2_average,
 								&ewl, &err_simul );
 		hb_if_err_propagate_goto( err, err_simul, error_handler );
 
@@ -1362,9 +1430,9 @@ int main ( int argc, char *argv[] )
 
 	OCLObjects_t oclobj = { NULL, NULL, NULL, NULL };	/* OpenCL related objects: context, device, queue, program. */
 
-	HBKernels_t krnl = { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL };	/* Kernels. */
-	HBGlobalWorkSizes_t gws = { {0}, {0}, {0}, {0}, {0}, {0}, {0, 0}, {0}, {0} };	/* Global work sizes for all kernels. */
-	HBLocalWorkSizes_t  lws = { {0}, {0}, {0}, {0}, {0}, {0}, {0, 0}, {0}, {0} };	/* Local work sizes for all kernels. */
+	HBKernels_t krnl = { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL };			/* Kernels. */
+	HBGlobalWorkSizes_t gws = { {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0, 0}, {0}, {0} };		/* Global work sizes for all kernels. */
+	HBLocalWorkSizes_t  lws = { {0}, {0}, {0}, {0}, {0}, {0}, {0}, {0, 0}, {0}, {0} };		/* Local work sizes for all kernels. */
 
 	HBHostBuffers_t hst_buff = { NULL, /*NULL, NULL, NULL, { NULL, NULL }, NULL, NULL,*/ NULL };	/* Host buffers. */
 	HBDeviceBuffers_t dev_buff = { NULL, NULL, NULL, NULL, { NULL, NULL }, NULL, NULL, NULL };	/* Device buffers. */
@@ -1451,10 +1519,11 @@ clean_all:
 	if (dev_buff.bug_step_retry)	ccl_buffer_destroy( dev_buff.bug_step_retry );
 
 	/** Destroy kernel wrappers. */
-	if (krnl.unhapp_stp2_average)	ccl_kernel_destroy( krnl.unhapp_stp2_average );
-	if (krnl.unhapp_stp1_reduce)	ccl_kernel_destroy( krnl.unhapp_stp1_reduce );
+	if (krnl.unhapp_step2_average)	ccl_kernel_destroy( krnl.unhapp_step2_average );
+	if (krnl.unhapp_step1_reduce)	ccl_kernel_destroy( krnl.unhapp_step1_reduce );
 	if (krnl.comp_world_heat)	ccl_kernel_destroy( krnl.comp_world_heat );
-	if (krnl.bug_step)		ccl_kernel_destroy( krnl.bug_step );
+	if (krnl.bug_step_any_free)	ccl_kernel_destroy( krnl.bug_step_any_free );
+	if (krnl.bug_step_best)		ccl_kernel_destroy( krnl.bug_step_best );
 	if (krnl.prepare_step_report)	ccl_kernel_destroy( krnl.prepare_step_report );
 	if (krnl.prepare_bug_step)	ccl_kernel_destroy( krnl.prepare_bug_step );
 	if (krnl.init_swarm)		ccl_kernel_destroy( krnl.init_swarm );
